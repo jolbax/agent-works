@@ -23,6 +23,7 @@ case "$1 $2" in
     case "$SCENARIO" in
       nohandle) echo '{"result":{"launch":{"outcome":{"kind":"chat"}}}}' ;;
       garbage-create) echo 'not json' ;;
+      create-error) echo '{"ok":false,"error":{"code":"repo_not_found","message":"repo_not_found"}}'; exit 1 ;;
       *) echo '{"result":{"launch":{"outcome":{"kind":"terminal","handle":"term_stub"}}}}' ;;
     esac ;;
   "terminal read")
@@ -67,6 +68,7 @@ run delivered-codex      0 0 "handle=term_stub stage=screen_activity"
 run resent               0 1 "turn_started (resent once)"
 run second-failure       4 1 "handle=term_stub"
 run nohandle             3 0 "no terminal handle"
+run create-error         1 0 "worktree create failed (exit 1): repo_not_found: repo_not_found"
 run garbage-create       1 0 "cannot parse worktree create"
 run garbage-read         1 0 "cannot parse terminal read"
 run string-tail          1 0 "cannot parse terminal read"

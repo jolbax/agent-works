@@ -35,10 +35,19 @@ prompt=$(cat "$promptfile")
 # json_get <python-expr on d>: print a value from JSON on stdin; non-zero if unparsable.
 json_get() { python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$1"; }
 
-create=$("$ORCA" worktree create --name "$name" --agent "$agent" --prompt "$prompt" "$@" --json) || {
-  echo "loop-launch: worktree create failed; if the error names an operationId, re-issue the same command with --retry-launch <operationId> and do not launch fresh" >&2
+create_rc=0
+create=$("$ORCA" worktree create --name "$name" --agent "$agent" --prompt "$prompt" "$@" --json) || create_rc=$?
+if [ "$create_rc" != 0 ]; then
+  # --json reports errors on stdout; show Orca's own code and message.
+  detail=$(python3 -I -c '
+import json, sys
+e = json.load(sys.stdin)["error"]
+print("%s: %s" % (e.get("code"), e.get("message")))
+' <<<"$create" 2>/dev/null) || detail=$create
+  echo "loop-launch: worktree create failed (exit $create_rc): ${detail:-no output}" >&2
+  echo "loop-launch: if the error names an operationId, re-issue the same command with --retry-launch <operationId> and do not launch fresh" >&2
   exit 1
-}
+fi
 handle=$(json_get 'd["result"]["launch"]["outcome"].get("handle") or ""' <<<"$create") || {
   echo "loop-launch: cannot parse worktree create result; sent nothing further" >&2
   exit 1

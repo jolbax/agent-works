@@ -8,7 +8,7 @@
 - [x] 2.1 Write `scripts/loop-launch.sh` (bash + `python3`, no other dependencies). Check: `bash -n scripts/loop-launch.sh` exits 0.
 - [x] 2.2 Run shellcheck on it. Check: `shellcheck scripts/loop-launch.sh` exits 0, or the PR states shellcheck was not run because it is not installed.
 - [x] 2.3 Add a stub-based check with a fake `orca-ide` for the four helper scenarios (delivered, resent once, second failure, no handle). Check: running it reports each scenario and exits non-zero if the helper misbehaves; the PR labels it a simulation.
-- [ ] 2.4 Run one real launch of a trivial prompt through the helper. Check: the PR shows the printed handle and confirmed `turn_started` stage, or states it was not run.
+- [x] 2.4 Run one real launch of a trivial prompt through the helper. Check: the PR shows the printed handle and confirmed `turn_started` stage, or states it was not run.
 
 ## 3. Documentation
 
