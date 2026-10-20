@@ -40,10 +40,12 @@ GH_CMD=${GH:-gh}
 view=$("$GH_CMD" pr view "$pr" --json state,isDraft,baseRefName,headRefOid,body,statusCheckRollup,comments) || {
   echo "loop-merge: gh pr view #$pr failed; nothing changed" >&2; exit 1; }
 
-# Prints "<head> <isDraft>" on success; otherwise "<exit-code> <reason>" on stderr and exits with it.
-verdict=$(python3 -I - "$sha" "${LOOP_BASE:-main}" "${LOOP_REQUIRED_CHECK:-openspec}" "$view" <<'PY'
+# Prints "<head> <isDraft>" on success; otherwise the reason on stderr and exits
+# with its code. The PR JSON goes in on stdin: as an argument it would hit the
+# kernel's per-argument limit (about 128 KiB) on a long PR.
+check_py=$(cat <<'PY'
 import json, re, sys
-sha, base, check, raw = sys.argv[1].lower(), sys.argv[2], sys.argv[3], sys.argv[4]
+sha, base, check, raw = sys.argv[1].lower(), sys.argv[2], sys.argv[3], sys.stdin.read()
 def stop(code, msg):
     print(f"loop-merge: {msg}; nothing changed", file=sys.stderr); sys.exit(code)
 try:
@@ -75,19 +77,22 @@ else:
 if not ok:
     stop(5, f"required check {check!r} is {now} on {head[:7]}")
 if kind == "implementation":
-    pat = re.compile(r"^\W*Verdict:\s*(.*?)\s+at\s+([0-9a-fA-F]{7,40})\b")
+    # The comment must start with the verdict line (optionally bold); a quote
+    # such as "> Verdict: ..." in a reply does not count.
+    pat = re.compile(r"^(?:\*\*)?Verdict:\s*(.*?)\s+at\s+([0-9a-fA-F]{7,40})\b")
     found = [(c.get("createdAt") or "", pat.match(c.get("body") or "")) for c in comments]
     found = sorted((f for f in found if f[1]), key=lambda f: f[0])
     if not found:
         stop(6, "implementation PR has no 'Verdict: ... at <sha>' comment")
     result, at = found[-1][1].group(1), found[-1][1].group(2).lower()
-    if not result.startswith("PASS"):
+    if result != "PASS":
         stop(6, f"newest judge verdict is '{result}', not PASS")
     if not head.startswith(at):
         stop(6, f"newest judge verdict is for {at}, not the head {head[:7]}: judge again")
 print(head, "true" if draft else "false")
 PY
-) || exit $?
+)
+verdict=$(python3 -I -c "$check_py" "$sha" "${LOOP_BASE:-main}" "${LOOP_REQUIRED_CHECK:-openspec}" <<<"$view") || exit $?
 read -r head draft <<<"$verdict"
 
 if [ "$dry" = 1 ]; then

@@ -37,6 +37,7 @@ case "$status" in
   todo|in-progress|in-review|completed) ;;
   *) echo "loop-status: unknown status '$status' (expected todo, in-progress, in-review or completed)" >&2; exit 2 ;;
 esac
+[ -n "$message" ] || { echo "loop-status: the message must not be empty" >&2; exit 2; }
 [ -z "$pr" ] || [[ "$pr" =~ ^[0-9]+$ ]] || { echo "loop-status: --pr must be a number, got '$pr'" >&2; exit 2; }
 [ -z "$issue" ] || [[ "$issue" =~ ^[0-9]+$ ]] || { echo "loop-status: --issue must be a number, got '$issue'" >&2; exit 2; }
 if [ -z "$worktree" ]; then

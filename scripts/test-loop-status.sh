@@ -65,6 +65,7 @@ run "unknown status rejected without a call" 2 - review "typo"
 run "non-numeric PR rejected without a call" 2 - in-review x --pr seven
 run "non-numeric issue rejected without a call" 2 - in-review x --issue 1a
 run "missing message is a usage error"      2 - in-review
+run "empty message rejected without a call"  2 - in-review ""
 RESULT=fail    run "orca-ide call fails"          1 "worktree|set|--worktree|branch:f|--workspace-status|todo|--comment|m|--read|--json" todo m --worktree branch:f
 RESULT=notok   run "result not ok (selector_ambiguous)"             1 "worktree|set|--worktree|branch:f|--workspace-status|todo|--comment|m|--read|--json" todo m --worktree branch:f
 RESULT=garbage run "result not JSON"              1 "worktree|set|--worktree|branch:f|--workspace-status|todo|--comment|m|--read|--json" todo m --worktree branch:f

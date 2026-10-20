@@ -30,7 +30,7 @@ chmod +x "$work/gh"
 
 # fixture <file> [key=value ...]: write a gh pr view result; keys override defaults.
 #   state draft base kind check(success|pending|failed|none|status|rerun-ok|rerun-bad)
-#   verdict(none|pass|blocking|other|legacy)
+#   verdict(none|pass|blocking|other|legacy|quoted|passed|bold)  big=1 adds a 200 KB body
 fixture() {
   python3 -I - "$HEAD" "$@" <<'PY'
 import json, sys
@@ -54,8 +54,11 @@ comments = {
     "blocking": [{"createdAt": "2026-10-20T11:00:00Z", "body": "Verdict: PASS at " + head[:7]}, {**old, "createdAt": "2026-10-20T12:00:00Z"}],
     "other": [{"createdAt": "2026-10-20T11:00:00Z", "body": "Verdict: PASS at 0000000"}],
     "legacy": [{"createdAt": "2026-10-20T11:00:00Z", "body": "Verdict: PASS"}],
+    "quoted": [{"createdAt": "2026-10-20T11:00:00Z", "body": "> Verdict: PASS at " + head[:7] + "\n\nagreed"}],
+    "passed": [{"createdAt": "2026-10-20T11:00:00Z", "body": "Verdict: PASSED at " + head[:7]}],
+    "bold": [{"createdAt": "2026-10-20T11:00:00Z", "body": "**Verdict: PASS at " + head[:7] + "**"}],
 }[o["verdict"]]
-body = "## Summary\n\nx\n\n## Kind\n\n" + ("Kind: " + o["kind"] if o["kind"] != "none" else "Kind:") + "\n"
+body = "## Summary\n\n" + ("x" * 200000 if o.get("big") == "1" else "x") + "\n\n## Kind\n\n" + ("Kind: " + o["kind"] if o["kind"] != "none" else "Kind:") + "\n"
 json.dump({"state": o["state"], "isDraft": o["draft"] == "true", "baseRefName": o["base"], "headRefOid": head,
            "body": body, "statusCheckRollup": checks, "comments": comments}, open(out, "w"))
 PY
@@ -113,6 +116,10 @@ run "implementation without verdict"           6 - "no 'Verdict" "${HEAD:0:7}" -
 run "implementation, newest verdict blocking"  6 - "not PASS" "${HEAD:0:7}" -- kind=implementation verdict=blocking
 run "implementation, PASS for another head"    6 - "judge again" "${HEAD:0:7}" -- kind=implementation verdict=other
 run "implementation, legacy verdict w/o head" 6 - "no 'Verdict" "${HEAD:0:7}" -- kind=implementation verdict=legacy
+run "implementation, quoted verdict ignored"  6 - "no 'Verdict" "${HEAD:0:7}" -- kind=implementation verdict=quoted
+run "implementation, PASSED is not PASS"      6 - "not PASS" "${HEAD:0:7}" -- kind=implementation verdict=passed
+run "implementation, bold verdict line"       0 "ready comment merge" "merged #42" "${HEAD:0:7}" -- kind=implementation verdict=bold
+run "200 KB PR body does not break the check" 0 "ready comment merge" "merged #42" "${HEAD:0:7}" -- big=1
 run "implementation, PASS at the head"         0 "ready comment merge" "merged #42" "${HEAD:0:7}" -- kind=implementation verdict=pass
 run "archive PR needs no verdict"              0 "ready comment merge" "merged #42" "${HEAD:0:7}" -- kind=archive
 run "closed PR"                                3 - "not OPEN" "${HEAD:0:7}" -- state=CLOSED
