@@ -8,11 +8,13 @@ This concerns how agent-works is *developed*. It is not product design: the fact
 
 ## What Changes
 
-- Add `docs/dev-loop.md`: the loop (setup, intake, propose, approve, implement, judge, ship, archive), roles, the eight rules, the exact `orca-ide` / `openspec` / `gh` commands per step, failure handling, and a "Reuse in another Orca project" checklist (what to copy, what to adapt, what the operator does in the GitHub UI).
+- Add `docs/dev-loop.md`: the loop (setup, intake, propose, approve, implement, judge, ship, archive), roles, the rules, the exact `orca-ide` / `openspec` / `gh` commands per step, failure handling, and a "Reuse in another Orca project" checklist (what to copy, what to adapt, what the operator does in the GitHub UI).
 - Add `.agents/loop/`: project-agnostic prompt templates with `<placeholders>` (`propose.md`, `apply.md` with the MUST-NOT list, `judge.md`, `fix.md`, `archive.md`) and a `README.md` mapping each to its step and command.
 - Add `.github/ISSUE_TEMPLATE/change.md` and `.github/pull_request_template.md`.
 - Add `scripts/test-spec-lock.sh`, which reproduces the spec-lock scenarios in a throwaway git repo and fails if any behaves wrongly.
-- Edit `AGENTS.md`: replace the workflow paragraph under "Repository and change workflow" with a short pointer to `docs/dev-loop.md`; keep every existing rule.
+- Edit `AGENTS.md`: KEEP the rule sentences (implementation PRs may only tick `tasks.md`; no deleting or weakening tests, and no changing tooling or test configuration, unless the approved change names it) and ADD a pointer to `docs/dev-loop.md`. Agents load `AGENTS.md` automatically, not `docs/dev-loop.md`, so the rules must stay there.
+- Update `AGENTS.md` and `README.md` wherever they call the repository private: it is now public. Do NOT select a license; licensing stays an open operator decision.
+- State honestly how `main` is protected: an operator-created GitHub ruleset (pull request required, required status check `openspec`, no required approvals because every PR is authored by the operator's account). Rulesets are enforced on public repositories and, for private ones, only on paid plans.
 - Add the OpenSpec capability `development-loop`, whose requirements are the rules above with testable scenarios.
 
 Deliberately not used: hooks, multi-reviewer fan-out, adversarial verification waves, a project board, hash-bound approvals, a long-waiting Orca gate, a coordinator agent for small changes.
@@ -29,7 +31,7 @@ None. `openspec/specs/` holds no capabilities yet.
 ## Impact
 
 - New: `docs/dev-loop.md`, `.agents/loop/*`, `.github/ISSUE_TEMPLATE/change.md`, `.github/pull_request_template.md`, `scripts/test-spec-lock.sh`.
-- Edited: `AGENTS.md` (workflow paragraph only).
+- Edited: `AGENTS.md` (pointer added, rules kept, visibility wording) and `README.md` (visibility wording only).
 - Unchanged: `.github/workflows/ci.yml` (agents' token cannot edit it), `scripts/spec-lock.sh`, `openspec/config.yaml`, all product docs, and decisions D1–D6. No product code, no new dependencies.
 - Files under `.github/` trigger the spec-lock config NOTE; the judge must justify them against this change.
 - Operator task, outside this change: optionally wire `bash scripts/test-spec-lock.sh` into `.github/workflows/ci.yml`.

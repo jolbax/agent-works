@@ -100,11 +100,15 @@ After a judge reports blocking findings, at most two fix rounds SHALL occur, eac
 - **THEN** no further fix round starts and the operator is asked to decide
 
 ### Requirement: Operator merges and holds workflow authority
-Only the operator SHALL merge pull requests and change `.github/workflows/`. Agents SHALL push branches and open draft PRs only, and their GitHub token SHALL lack `workflow` and administration permission. Nothing SHALL reach `main` without a PR.
+Only the operator SHALL merge pull requests and change `.github/workflows/`. Agents SHALL push branches and open draft PRs only; their token SHALL lack `workflow` and administration permission. `main` SHALL be protected by an operator-created GitHub ruleset requiring a pull request and the status check `openspec`, with no required approvals.
 
 #### Scenario: Agent finishes a PR
 - **WHEN** a worker completes its task
 - **THEN** the PR is a draft and awaits the operator to mark it ready and merge it
+
+#### Scenario: Direct push to main is rejected
+- **WHEN** anyone pushes a commit directly to `main`
+- **THEN** GitHub rejects the push because the ruleset requires a pull request
 
 #### Scenario: Workflow change needed
 - **WHEN** a change needs an edit to `.github/workflows/`
@@ -118,11 +122,11 @@ Archiving a change SHALL be done in its own PR confined to `openspec/`, opened a
 - **THEN** a separate openspec-only PR archives the change and syncs specs
 
 ### Requirement: Loop kit is portable
-The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templates in `.agents/loop/` with `<placeholders>`, issue and PR templates, and `scripts/test-spec-lock.sh`. `docs/dev-loop.md` SHALL include a "Reuse in another Orca project" checklist covering what to copy, what to adapt and what the operator does in the GitHub UI.
+The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templates in `.agents/loop/` with `<placeholders>`, issue and PR templates, and `scripts/test-spec-lock.sh`. `docs/dev-loop.md` SHALL include a "Reuse in another Orca project" checklist covering what to copy, what to adapt and what the operator does in the GitHub UI, including creating the ruleset and the caveat that rulesets are enforced on public repositories and, for private ones, only on paid plans.
 
 #### Scenario: Reuse checklist content
 - **WHEN** an operator reads the checklist
-- **THEN** it names the files to copy, the items to adapt (`openspec/config.yaml` context, the `AGENTS.md` section, token scope, the rule on `main`) and the GitHub UI steps
+- **THEN** it names the files to copy, the items to adapt (`openspec/config.yaml` context, the `AGENTS.md` section, token scope, the ruleset on `main`), the GitHub UI steps and the plan caveat
 
 #### Scenario: Templates carry no project specifics
 - **WHEN** a prompt template in `.agents/loop/` is searched for the repository name `agent-works`
@@ -138,6 +142,20 @@ The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templat
 #### Scenario: Broken lock detected
 - **WHEN** the lock allows a `proposal.md` edit alongside code
 - **THEN** the test script exits non-zero and names the failing scenario
+
+### Requirement: AGENTS.md keeps the rules and points to the loop
+`AGENTS.md` SHALL keep the rule sentences that implementation PRs may only tick `tasks.md` and that tests are not deleted or weakened, nor tooling or test configuration changed, unless the approved change names it, and SHALL add a pointer to `docs/dev-loop.md`. Agents load `AGENTS.md` automatically, not the doc.
+
+#### Scenario: Rules still present
+- **WHEN** `AGENTS.md` is read after the change
+- **THEN** both rule sentences are present and a link to `docs/dev-loop.md` exists
+
+### Requirement: Repository visibility is stated accurately
+`AGENTS.md` and `README.md` SHALL describe `jolbax/agent-works` as public wherever they referred to it as private, and SHALL NOT select a license; licensing remains an open operator decision.
+
+#### Scenario: No stale private wording
+- **WHEN** `AGENTS.md` and `README.md` are searched for the word "private" in reference to the repository
+- **THEN** no such reference remains and no license is named
 
 ### Requirement: Loop documentation stays separate and honest
 `docs/dev-loop.md` SHALL state that it describes repository development, not the product lifecycle, SHALL NOT claim a command or check was run without retained evidence, and SHALL cite only `orca-ide` and `openspec` commands verified with `--help`.
