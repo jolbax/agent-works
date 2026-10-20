@@ -11,4 +11,4 @@
 
 - [x] 3.1 Run `openspec validate --all --strict`. Check: exits zero.
 - [x] 3.2 Run `BASE=origin/main bash scripts/spec-lock.sh`. Check: exits zero.
-- [ ] 3.3 Record in the PR description each command run with its output, and state any check not run. Check: Evidence section present.
+- [x] 3.3 Record in the PR description each command run with its output, and state any check not run. Check: Evidence section present.
