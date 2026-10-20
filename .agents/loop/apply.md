@@ -1,6 +1,6 @@
 # Apply prompt
 
-Step: Implement (docs/dev-loop.md). Launched on a new worktree based on `origin/main` after the spec PR has been merged, for example `orca-ide worktree create --name <change-name>-impl --agent claude --base-branch origin/main --prompt "$(cat .agents/loop/apply.md)"`.
+Step: Implement (docs/dev-loop.md). Launched on a new worktree based on `origin/main` after the spec PR has been merged, for example `git fetch origin && orca-ide worktree create --name <change-name>-impl --agent claude --base-branch origin/main --prompt "$(cat .agents/loop/apply.md)"`.
 
 ---
 

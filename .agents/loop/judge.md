@@ -1,6 +1,6 @@
 # Judge prompt
 
-Step: Judge (docs/dev-loop.md). Launched with a model different from the builder's, for example `orca-ide worktree create --name <change-name>-judge --agent codex --base-branch origin/main --prompt "$(cat .agents/loop/judge.md)"`.
+Step: Judge (docs/dev-loop.md). Launched with a model different from the builder's, for example `git fetch origin && orca-ide worktree create --name <change-name>-judge --agent codex --base-branch origin/main --prompt "$(cat .agents/loop/judge.md)"`.
 
 ---
 

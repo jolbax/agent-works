@@ -1,6 +1,6 @@
 # Archive prompt
 
-Step: Archive (docs/dev-loop.md). Launched after the implementation PR has merged, on a new worktree based on `origin/main`, for example `orca-ide worktree create --name <change-name>-archive --agent claude --base-branch origin/main --prompt "$(cat .agents/loop/archive.md)"`.
+Step: Archive (docs/dev-loop.md). Launched after the implementation PR has merged, on a new worktree based on `origin/main`, for example `git fetch origin && orca-ide worktree create --name <change-name>-archive --agent claude --base-branch origin/main --prompt "$(cat .agents/loop/archive.md)"`.
 
 ---
 

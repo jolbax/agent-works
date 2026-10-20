@@ -81,9 +81,10 @@ The operator reviews and merges the spec PR. The merge commit approves that exac
 
 ### 4. Implement (Claude worker)
 
-Create a new branch from `origin/main` after the merge; do not rebase the spec branch:
+Fetch, then create a new branch from `origin/main` after the merge; do not rebase the spec branch, and never pass a bare `main` as the base:
 
 ```bash
+git fetch origin
 orca-ide worktree create --name <name>-impl --agent claude --base-branch origin/main --prompt "<apply prompt>"
 ```
 
@@ -92,12 +93,14 @@ The prompt comes from [`.agents/loop/apply.md`](../.agents/loop/apply.md) and ca
 Use parallel workers only when task groups touch disjoint files, at most three at once; if two groups touch the same file, one worker does both:
 
 ```bash
-orca-ide orchestration worker-start --worktree new-child --base-branch main --agent claude --spec "<task group prompt>"
+git fetch origin
+orca-ide orchestration worker-start --worktree new-child --base-branch origin/main --agent claude --spec "<task group prompt>"
 ```
 
 ### 5. Judge (Codex worker)
 
 ```bash
+git fetch origin
 orca-ide worktree create --name <name>-judge --agent codex --base-branch origin/main --prompt "<judge prompt>"
 ```
 
@@ -133,7 +136,7 @@ After the implementation PR merges, a separate PR confined to `openspec/` archiv
 
 ## What has been verified
 
-This file claims no execution of its own. Evidence for the checks that back it (the spec-lock regression script, `openspec validate`, and the `--help` output of every cited command) is in the description of the implementation pull request. The loop itself has not yet been run end to end by this document's authors beyond that change.
+This file claims no execution of its own. Evidence for the checks that back it (the spec-lock regression script, `openspec validate`, and the `--help` output of every cited command) is retained in the description of the implementation pull request #4 (exact commands and complete output), not in this repository. The loop itself has not yet been run end to end by this document's authors beyond that change.
 
 ## Reuse in another Orca project
 
