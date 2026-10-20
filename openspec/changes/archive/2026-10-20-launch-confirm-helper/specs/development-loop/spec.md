@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Loop kit is portable
-The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templates in `.agents/loop/` with `<placeholders>`, issue and PR templates, `scripts/test-spec-lock.sh` and the launch helper `scripts/loop-launch.sh`. `docs/dev-loop.md` SHALL include a "Reuse in another Orca project" checklist covering what to copy, what to adapt and what the operator does in the GitHub UI, including creating the ruleset and the caveat that rulesets are enforced on public repositories and, for private ones, only on paid plans.
+The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templates in `.agents/loop/` with `<placeholders>`, issue and PR templates, `scripts/test-spec-lock.sh` and the launch helper `scripts/loop-launch.sh`. `docs/dev-loop.md` SHALL include a "Reuse in another Orca project" checklist covering what to copy, what to adapt and what the operator does in the GitHub UI, including the GitHub UI steps and the ruleset plan caveat named in the scenario below.
 
 #### Scenario: Reuse checklist content
 - **WHEN** an operator reads the checklist
