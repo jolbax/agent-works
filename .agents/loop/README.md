@@ -6,7 +6,7 @@ Project-agnostic prompts for the spec-driven loop described in [docs/dev-loop.md
 | --- | --- | --- |
 | [propose.md](propose.md) | Propose | `git fetch origin && orca-ide worktree create --name <name> --issue <N> --agent claude --prompt …` |
 | [apply.md](apply.md) | Implement | `git fetch origin && orca-ide worktree create --name <name>-impl --agent claude --base-branch origin/main --prompt …`; parallel groups with `git fetch origin && orca-ide orchestration worker-start --worktree new-child --base-branch origin/main …` |
-| [judge.md](judge.md) | Judge | `git fetch origin && orca-ide worktree create --name <name>-judge --agent codex --base-branch origin/main --prompt …` |
+| [judge.md](judge.md) | Judge | `git fetch origin && orca-ide worktree create --name <name>-judge --agent codex --base-branch "origin/$(gh pr view <pr-number> --repo <owner>/<repo> --json headRefName -q .headRefName)" --prompt …` (based on the PR head, not `origin/main`) |
 | [fix.md](fix.md) | Fix round (at most two) | a new prompt to the builder, via `orca-ide terminal send --terminal <handle> --text … --enter` |
 | [archive.md](archive.md) | Archive | `git fetch origin && orca-ide worktree create --name <name>-archive --agent claude --base-branch origin/main --prompt …` |
 

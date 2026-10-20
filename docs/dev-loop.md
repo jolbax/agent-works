@@ -101,10 +101,12 @@ orca-ide orchestration worker-start --worktree new-child --base-branch origin/ma
 
 ```bash
 git fetch origin
-orca-ide worktree create --name <name>-judge --agent codex --base-branch origin/main --prompt "<judge prompt>"
+orca-ide worktree create --name <name>-judge --agent codex --base-branch "origin/$(gh pr view <N> --repo <owner>/<repo> --json headRefName -q .headRefName)" --prompt "<judge prompt>"
 ```
 
-The prompt comes from [`.agents/loop/judge.md`](../.agents/loop/judge.md). The judge reads the approved change at `origin/main` and `gh pr diff <N>`, re-runs the check commands itself, and reports pass or fail for every scenario with command output. Each finding is blocking or advisory; one the judge cannot decide counts as blocking. It posts with `gh pr comment <N> --body-file <file>`, not an approve or request-changes review.
+The judge's worktree is based on the PR's head branch, so that re-running checks tests the PR and not `main`. Before a re-judge, the judge's worktree is reset to the new PR head.
+
+The prompt comes from [`.agents/loop/judge.md`](../.agents/loop/judge.md); its first step confirms `git rev-parse HEAD` equals the PR's `headRefOid` and stops with a blocking finding if not. The judge reads the approved change at `origin/main` and `gh pr diff <N>`, re-runs the check commands itself, and reports pass or fail for every scenario with command output. Each finding is blocking or advisory; one the judge cannot decide counts as blocking. It posts with `gh pr comment <N> --body-file <file>`, not an approve or request-changes review.
 
 ### 6. Fix rounds
 
