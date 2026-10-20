@@ -31,10 +31,12 @@ Use meaningful production-boundary checks. Test interruption, ambiguous effects,
 
 Measure equivalent completed workflows when optimizing: task success, human intervention, recovery correctness, token use, elapsed time, CPU, and peak process-family memory. Label unmeasured costs and estimates.
 
-Keep REA and existing investigation artifacts unchanged. Use its public CLI/MCP boundary for future integration. Do not publish beyond the private repository, add other remotes, select a license, or attest to human review without the corresponding instruction.
+Keep REA and existing investigation artifacts unchanged. Use its public CLI/MCP boundary for future integration. Do not publish beyond `jolbax/agent-works`, add other remotes, select a license, or attest to human review without the corresponding instruction.
 
 ## Repository and change workflow
 
-The private GitHub repository `jolbax/agent-works` (`origin`) is the only remote. Agents may push branches and open draft pull requests to it; only the operator merges, and nothing reaches `main` without a pull request.
+The public GitHub repository `jolbax/agent-works` (`origin`) is the only remote. Agents may push branches and open draft pull requests to it; only the operator merges, and nothing reaches `main` without a pull request.
 
 Changes follow OpenSpec (`openspec/`). A change's proposal, design and specs are approved by merging its spec-only pull request; an implementation pull request may tick `tasks.md` but must not edit them — CI enforces this (`scripts/spec-lock.sh`). Do not delete or weaken tests, or change tooling and test configuration, unless the approved change names it.
+
+The full loop (roles, commands, failure handling, reuse in other projects) is in [docs/dev-loop.md](docs/dev-loop.md); it is not loaded automatically, so the rules above stay here.

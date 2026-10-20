@@ -33,4 +33,4 @@ The design draws on static Droid analysis and Astra's planning advice. Recovered
 
 ## Working here
 
-Refine the contracts and acceptance scenarios before adding runtime code. Resolve the decisions required by each milestone and record the rationale. No install, build, or run command exists yet. The private GitHub repository `jolbax/agent-works` is the remote; changes go through OpenSpec and pull requests (see [AGENTS.md](AGENTS.md)). No license is selected; publication beyond that private repository requires an explicit licensing decision.
+Refine the contracts and acceptance scenarios before adding runtime code. Resolve the decisions required by each milestone and record the rationale. No install, build, or run command exists yet. The public GitHub repository `jolbax/agent-works` is the remote; changes go through OpenSpec and pull requests (see [AGENTS.md](AGENTS.md) and the [development loop](docs/dev-loop.md)). No license is selected; licensing remains an open operator decision.
