@@ -1,0 +1,26 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local execution state and artifacts
+.agent-works/
+artifacts/
+runs/
+workspaces/
+*.log
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
