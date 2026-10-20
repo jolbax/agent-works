@@ -1,8 +1,8 @@
 # Development loop
 
-This document describes how this repository is *developed*: how a change moves from an idea to a merged, archived change using Orca worktrees, OpenSpec and GitHub. It is separate from the product's lifecycle contracts in [architecture.md](architecture.md), where "change", "stage attempt" and "approval" mean the factory's own records. Nothing here is a product design, and nothing here is part of the product's runtime.
+This document describes how this repository is *developed*: how a change moves from an idea to a merged, archived change using Orca worktrees, OpenSpec and GitHub. GitHub is the record and the enforcement layer: issues, pull requests, evidence, verdicts, CI, the spec lock and the ruleset. Orca is where the operator works: each worker reports its state on its worktree, and the operator answers in the worker's terminal. It is separate from the product's lifecycle contracts in [architecture.md](architecture.md), where "change", "stage attempt" and "approval" mean the factory's own records. Nothing here is a product design, and nothing here is part of the product's runtime.
 
-The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)). The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
+The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)), and the operator helpers [`scripts/loop-status.sh`](../scripts/loop-status.sh) and [`scripts/loop-merge.sh`](../scripts/loop-merge.sh) with their simulation tests. The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
 
 The rules that agents must follow are repeated in [AGENTS.md](../AGENTS.md), which agents load automatically. This file is not loaded automatically.
 
@@ -10,10 +10,10 @@ The rules that agents must follow are repeated in [AGENTS.md](../AGENTS.md), whi
 
 | Role | Who | Does |
 | --- | --- | --- |
-| Operator | the human owner | writes intake issues, reviews and merges every PR, creates the ruleset on `main`, edits `.github/workflows/` |
+| Operator | the human owner | starts changes (a brief in Orca or a GitHub issue), reviews in Orca, decides every merge (`approve <sha>` in the worker's terminal, or a merge on GitHub), creates the ruleset on `main`, edits `.github/workflows/` |
 | Propose worker | Claude agent | writes OpenSpec artifacts, opens a spec-only draft PR, stops |
 | Builder | Claude agent | implements an approved change, opens a draft PR with evidence |
-| Judge | Codex agent (a different model from the builder) | re-runs the checks, posts a verdict comment |
+| Judge | Codex agent (a different model from the builder) | re-runs the checks, posts a verdict comment naming the head, writes the verdict onto the builder's Orca worktree; never merges, never types into a terminal |
 | CI | GitHub Actions workflow `openspec` | validates OpenSpec, runs the spec lock from the base branch |
 
 ## Rules
@@ -24,7 +24,7 @@ The rules that agents must follow are repeated in [AGENTS.md](../AGENTS.md), whi
 4. The judge is a different model and re-runs the checks; the builder's evidence is a claim.
 5. Nothing is claimed without command output in the PR description. Evidence lives in the PR description only, never in repository files.
 6. At most two fix rounds, then the operator decides.
-7. The operator merges every PR.
+7. Every merge is the operator's decision: a merge on GitHub, or `approve <sha>` typed in the terminal of the worker that opened the PR, after which that worker runs `scripts/loop-merge.sh`.
 8. The agents' GitHub token has no `workflow` or administration permission; only the operator changes `.github/workflows/`.
 
 Which mechanism enforces what:
@@ -32,7 +32,8 @@ Which mechanism enforces what:
 | Rule | Enforced by |
 | --- | --- |
 | 2 | `scripts/spec-lock.sh` in CI, read from the base branch |
-| 7, nothing on `main` without a PR | the operator's ruleset on `main` (see below), plus the token's permissions |
+| nothing on `main` without a PR | the operator's ruleset on `main` (see below), plus the token's permissions |
+| 7 | a convention, backed by `scripts/loop-merge.sh` (head-bound, audit comment) and the templates; see below |
 | 8 | token scope |
 | 1, 3 (judgement part), 4, 5, 6 | the judge's checklist and the operator; no mechanism |
 
@@ -43,6 +44,26 @@ gh api repos/<owner>/<repo>/rules/branches/main
 ```
 
 The output must contain a `pull_request` rule and a `required_status_checks` rule whose context is `openspec`. An empty list `[]` means nothing is enforced.
+
+**Rule 7 is a convention, not an enforced control.** Every agent holds the operator's token, which can merge, and any agent can type into another worker's terminal with `orca-ide terminal send`. This was already true when the rule read "only the operator merges". `scripts/loop-merge.sh` does not change it. What the helper does is make each approval explicit and bound to a head:
+- it merges only at the head the operator approved (`gh pr merge --match-head-commit`), only with the `openspec` check green on that head, and, for implementation PRs, only with `Verdict: PASS at <sha>` for that head;
+- it posts an audit comment before merging.
+
+The templates accept `approve <sha>` only as the operator's own terminal message.
+
+## The operator in Orca
+
+Every worker except the judge sets its worktree's board status with `scripts/loop-status.sh`: `in-progress` when it starts, `in-review` (unread) when it waits for the operator, `completed` after its merge. Orca metadata is a notification only: if setting it fails, the worker carries on and says so in the PR.
+
+| Orca shows on the worktree | The operator |
+| --- | --- |
+| `PR #<N> at <sha7>: review, then type: approve <sha7>` | reviews the diff in Orca (for example `orca-ide file open-changed --mode diff --worktree <selector>`), then types `approve <sha7>` in that worker's terminal |
+| `Verdict: PASS at <sha7>; type: approve <sha7>` (builder) | types `approve <sha7>` in the builder's terminal |
+| `Verdict: BLOCKING (<n> findings) at <sha7>; type: fix` (builder) | types `fix` in the builder's terminal, then launches the re-judge |
+| a `loop-merge.sh` refusal | follows the reason (approve the new head, wait for CI, re-judge) |
+| `two fix rounds used; operator decides on GitHub` | decides on GitHub |
+
+The worker keeps waiting at its prompt after it stops, so the reply can come later. `scripts/loop-merge.sh <pr> <sha> [--dry-run]` exit codes: 0 merged (or would merge); 1 a `gh` call failed (never retried); 2 usage; 3 PR not open, wrong base or no `Kind:`; 4 the head moved since the approval; 5 the `openspec` check is missing, pending or failed; 6 implementation PR without `Verdict: PASS at <sha>` for the head.
 
 ## The loop, step by step
 
@@ -56,7 +77,7 @@ Then add `scripts/spec-lock.sh`, a CI workflow that runs `openspec validate --al
 
 ### 1. Intake (operator)
 
-Open a GitHub issue from the change issue template with the decisions answered up front. Agents do not wait for answers mid-run.
+Either open a GitHub issue from the change issue template (for example from a phone), or launch the propose worker from Orca with a `<brief>` instead of an issue number; the worker then files the issue itself with `gh issue create`. Either way the decisions are answered up front. Agents do not wait for answers mid-run.
 
 ### 2. Propose (Claude worker)
 
@@ -77,7 +98,7 @@ Anything the issue does not answer goes under "Open questions" in `proposal.md`.
 
 ### 3. Approve (operator and CI)
 
-The operator reviews and merges the spec PR. The merge commit approves that exact tree; elapsed time, agent output, a passing check or a judge verdict never approve a spec.
+The operator reviews the spec in Orca and types `approve <sha7>` in the propose worker's terminal, which merges it through `scripts/loop-merge.sh`. Merging on GitHub is equivalent. The merge commit approves that exact tree; elapsed time, agent output, a passing check or a judge verdict never approve a spec.
 
 ### 4. Implement (Claude worker)
 
@@ -106,19 +127,19 @@ bash scripts/loop-launch.sh <name>-judge codex <judge-prompt-file> --base-branch
 
 The judge's worktree is based on the PR's head branch, so that re-running checks tests the PR and not `main`. Before a re-judge, the judge's worktree is reset to the new PR head.
 
-The prompt comes from [`.agents/loop/judge.md`](../.agents/loop/judge.md); its first step confirms `git rev-parse HEAD` equals the PR's `headRefOid` and stops with a blocking finding if not. The judge reads the approved change at `origin/main` and `gh pr diff <N>`, re-runs the check commands itself, and reports pass or fail for every scenario with command output. Each finding is blocking or advisory; one the judge cannot decide counts as blocking. It posts with `gh pr comment <N> --body-file <file>`, not an approve or request-changes review.
+The prompt comes from [`.agents/loop/judge.md`](../.agents/loop/judge.md); its first step confirms `git rev-parse HEAD` equals the PR's `headRefOid` and stops with a blocking finding if not. The judge reads the approved change at `origin/main` and `gh pr diff <N>`, re-runs the check commands itself, and reports pass or fail for every scenario with command output. Each finding is blocking or advisory; one the judge cannot decide counts as blocking. It posts with `gh pr comment <N> --body-file <file>`, not an approve or request-changes review. The comment begins `Verdict: PASS at <sha7>` or `Verdict: BLOCKING (<n> findings) at <sha7>`. The judge then writes the verdict line onto the builder's worktree (`--worktree branch:<full head branch>`) and marks its own worktree `completed`.
 
 ### 6. Fix rounds
 
-For blocking findings, start a new builder prompt carrying them ([`.agents/loop/fix.md`](../.agents/loop/fix.md)), then judge again. After the second fix round, if blocking findings remain, no further round starts and the operator decides.
+For blocking findings, the operator types `fix` in the builder's terminal. The builder reads the newest verdict itself and follows [`.agents/loop/fix.md`](../.agents/loop/fix.md); a new builder prompt carrying the findings also works. Then judge again. After the second fix round, if blocking findings remain, no further round starts and the operator decides.
 
 ### 7. Ship (CI and operator)
 
-The operator marks the draft ready, waits for CI, and merges.
+The operator types `approve <sha7>` in the builder's terminal once the verdict is `PASS` at that head. `scripts/loop-merge.sh` checks CI and the verdict, marks the draft ready, comments and merges. Merging on GitHub is equivalent.
 
 ### 8. Archive (Claude worker)
 
-After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `openspec archive <name> -y` headless and asks no questions. `openspec archive -y` does not refuse open tasks, so the worker first checks `tasks.md` for unchecked boxes (`grep -nE '^\s*- \[ \]'`); if any exist it does not archive, lists them under "Not done" in the PR description and stops for the operator to decide. It is not part of the implementation PR, which would sync specs for unmerged work.
+After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `openspec archive <name> -y` headless and asks no questions. `openspec archive -y` does not refuse open tasks, so the worker first checks `tasks.md` for unchecked boxes (`grep -nE '^\s*- \[ \]'`); if any exist it does not archive, lists them under "Not done" in the PR description and stops for the operator to decide. It is not part of the implementation PR, which would sync specs for unmerged work. Like every other PR, the archive PR waits at `in-review` in Orca and merges on the operator's `approve <sha7>` in the archive worker's terminal.
 
 ## Failure handling
 
@@ -132,6 +153,8 @@ After the implementation PR merges, a separate PR confined to `openspec/` archiv
   orca-ide terminal send --terminal <handle> --text "<prompt>" --enter
   ```
 - **The spec lock fails.** The PR mixes code with spec edits. Split it: spec changes go in a spec PR, and an implementation PR only ticks `tasks.md`.
+- **`loop-merge.sh` refuses.** Exit 4: the head moved; review the new head and approve it. Exit 5: CI has not passed on the head; approve again when it has. Exit 6: judge again at the current head. Exit 1 after `gh pr ready`: the PR stays ready, and nothing is retried; check the PR before acting.
+- **`loop-status.sh` fails.** Nothing on GitHub depends on it. The worker reports it, and the operator finds the PR from the worker's last terminal line.
 - **A check cannot be run.** State under "Not done / not run" in the PR description; do not claim it.
 - **A workflow edit is needed.** List it as an operator task in the PR; agents cannot make it.
 - Orca runs Claude Code with `--dangerously-skip-permissions`, so authority comes from the git token and the ruleset, not from agent prompts.
@@ -148,6 +171,8 @@ This file claims no execution of its own. Evidence for the checks that back it (
 - `.github/ISSUE_TEMPLATE/change.md` and `.github/pull_request_template.md`
 - `scripts/spec-lock.sh` and `scripts/test-spec-lock.sh`
 - `scripts/loop-launch.sh` and `scripts/test-loop-launch.sh` (launch helper and its simulation test)
+- `scripts/loop-status.sh` and `scripts/test-loop-status.sh` (Orca status helper and its simulation test)
+- `scripts/loop-merge.sh` and `scripts/test-loop-merge.sh` (head-bound merge helper and its simulation test)
 - the CI workflow `openspec` (validate, then the lock read from the base commit)
 
 **Adapt:**
