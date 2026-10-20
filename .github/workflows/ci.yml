@@ -1,0 +1,33 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  openspec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate OpenSpec changes and specs
+        run: npx --yes @fission-ai/openspec@1.14.3 validate --all --strict
+      # The lock is read from the BASE branch, so a PR cannot weaken the rule
+      # it is checked against. Agents' token cannot edit workflows at all.
+      - name: Spec lock
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "$BASE:scripts/spec-lock.sh" 2>/dev/null; then
+            git show "$BASE:scripts/spec-lock.sh" > "$RUNNER_TEMP/spec-lock.sh"
+          else
+            echo "spec-lock: not on the base branch yet (bootstrap PR); using this PR's copy"
+            cp scripts/spec-lock.sh "$RUNNER_TEMP/spec-lock.sh"
+          fi
+          bash "$RUNNER_TEMP/spec-lock.sh"
