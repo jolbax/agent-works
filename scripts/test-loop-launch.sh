@@ -30,6 +30,8 @@ case "$1 $2" in
       delivered) echo '{"result":{"terminal":{"tail":["❯ build a thing","● Running ..."]}}}' ;;
       delivered-codex) echo '{"result":{"terminal":{"tail":["• Working (3s)"]}}}' ;;
       garbage-read) echo 'not json' ;;
+      string-tail) echo '{"result":{"terminal":{"tail":"● Running"}}}' ;;
+      idle-string-tail) echo '{"result":{"terminal":{"tail":"idle"}}}' ;;
       *) echo '{"result":{"terminal":{"tail":["  banner","❯"]}}}' ;;
     esac ;;
   "terminal send")
@@ -37,6 +39,7 @@ case "$1 $2" in
       resent) echo '{"result":{"send":{"accepted":true,"prompt":{"stages":["input_accepted","turn_started"]}}}}' ;;
       send-transport-error) echo "transport error; retry-request abc" >&2; exit 1 ;;
       garbage-send) echo 'not json' ;;
+      string-stages) echo '{"result":{"send":{"accepted":true,"prompt":{"stages":"not_turn_started"}}}}' ;;
       *) echo '{"result":{"send":{"accepted":true,"prompt":{"stages":["input_accepted"]}}}}' ;;
     esac ;;
 esac
@@ -66,6 +69,9 @@ run second-failure       4 1 "handle=term_stub"
 run nohandle             3 0 "no terminal handle"
 run garbage-create       1 0 "cannot parse worktree create"
 run garbage-read         1 0 "cannot parse terminal read"
+run string-tail          1 0 "cannot parse terminal read"
+run idle-string-tail     1 0 "cannot parse terminal read"
+run string-stages        1 1 "cannot parse terminal send"
 run garbage-send         1 1 "cannot parse terminal send"
 run send-transport-error 1 1 "not resending a new payload"
 

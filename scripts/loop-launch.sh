@@ -58,6 +58,8 @@ while :; do
 import json, sys
 d = json.load(sys.stdin)
 tail = d["result"]["terminal"]["tail"]
+if not isinstance(tail, list) or not all(isinstance(l, str) for l in tail):
+    sys.exit("tail is not a list of strings")
 print("working" if any(l.startswith(("● ", "• Working")) for l in tail) else "idle")
 ' <<<"$screen") || {
     echo "loop-launch: cannot parse terminal read result for $handle; sent nothing further" >&2
@@ -77,7 +79,14 @@ send=$("$ORCA" terminal send --terminal "$handle" --text "$prompt" --enter --wai
   echo "loop-launch: inspect the terminal, or re-issue the exact send command with the --retry-request ID from the error." >&2
   exit 1
 }
-ok=$(json_get '"yes" if d["result"]["send"]["accepted"] is True and "turn_started" in d["result"]["send"]["prompt"]["stages"] else "no"' <<<"$send") || {
+ok=$(python3 -I -c '
+import json, sys
+send = json.load(sys.stdin)["result"]["send"]
+stages = send["prompt"]["stages"]
+if not isinstance(stages, list) or not all(isinstance(x, str) for x in stages) or not isinstance(send["accepted"], bool):
+    sys.exit("send result has unexpected types")
+print("yes" if send["accepted"] and "turn_started" in stages else "no")
+' <<<"$send") || {
   echo "loop-launch: cannot parse terminal send result for $handle; not resending" >&2
   exit 1
 }
