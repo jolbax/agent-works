@@ -118,7 +118,7 @@ The operator marks the draft ready, waits for CI, and merges.
 
 ### 8. Archive (Claude worker)
 
-After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `/opsx:archive <name>`, equivalent to `openspec archive <name>`. It is not part of the implementation PR, which would sync specs for unmerged work.
+After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `openspec archive <name> -y` headless and asks no questions. `openspec archive -y` does not refuse open tasks, so the worker first checks `tasks.md` for unchecked boxes (`grep -nE '^\s*- \[ \]'`); if any exist it does not archive, lists them under "Not done" in the PR description and stops for the operator to decide. It is not part of the implementation PR, which would sync specs for unmerged work.
 
 ## Failure handling
 
