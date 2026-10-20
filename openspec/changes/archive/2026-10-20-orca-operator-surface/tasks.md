@@ -29,8 +29,8 @@
   - an audit comment that does not claim the merge happened.
 
   Check: `bash scripts/test-loop-merge.sh` exits 0, and exits non-zero when the head comparison is removed from the helper. The PR shows the output of both runs and labels them as simulations.
-- [ ] 3.3 Run `loop-merge.sh <pr> <head> --dry-run` against a real open PR. Check: the PR shows the output, and `gh pr view <pr> --json state,isDraft` is unchanged afterwards. If this was not run, the PR says so.
-- [ ] 3.4 Merge this change's own implementation PR with `loop-merge.sh`, but only after the operator types `approve <sha>`. Check: a PR comment added after the merge shows the helper's output and the merge commit. Otherwise, the PR says the ready and merge path is verified by stub only.
+- [x] 3.3 Run `loop-merge.sh <pr> <head> --dry-run` against a real open PR. Check: the PR shows the output, and `gh pr view <pr> --json state,isDraft` is unchanged afterwards. If this was not run, the PR says so.
+- [x] 3.4 Merge this change's own implementation PR with `loop-merge.sh`, but only after the operator types `approve <sha>`. Check: a PR comment added after the merge shows the helper's output and the merge commit. Otherwise, the PR says the ready and merge path is verified by stub only.
 
 ## 4. Templates and documentation
 
