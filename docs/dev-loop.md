@@ -61,7 +61,7 @@ Open a GitHub issue from the change issue template with the decisions answered u
 ### 2. Propose (Claude worker)
 
 ```bash
-orca-ide worktree create --name <name> --issue <N> --agent claude --prompt "<propose prompt>"
+bash scripts/loop-launch.sh <name> claude <propose-prompt-file> --issue <N>
 ```
 
 The prompt comes from [`.agents/loop/propose.md`](../.agents/loop/propose.md). The worker uses OpenSpec to create the change and stops at a **draft** pull request whose diff is limited to `openspec/changes/<name>/`:
@@ -85,7 +85,7 @@ Fetch, then create a new branch from `origin/main` after the merge; do not rebas
 
 ```bash
 git fetch origin
-orca-ide worktree create --name <name>-impl --agent claude --base-branch origin/main --prompt "<apply prompt>"
+bash scripts/loop-launch.sh <name>-impl claude <apply-prompt-file> --base-branch origin/main
 ```
 
 The prompt comes from [`.agents/loop/apply.md`](../.agents/loop/apply.md) and carries the MUST-NOT list. The worker runs `/opsx:apply <name>`, ticks each task only after its stated check has passed, and opens a draft PR whose description holds the evidence.
@@ -101,7 +101,7 @@ orca-ide orchestration worker-start --worktree new-child --base-branch origin/ma
 
 ```bash
 git fetch origin
-orca-ide worktree create --name <name>-judge --agent codex --base-branch "origin/$(gh pr view <N> --repo <owner>/<repo> --json headRefName -q .headRefName)" --prompt "<judge prompt>"
+bash scripts/loop-launch.sh <name>-judge codex <judge-prompt-file> --base-branch "origin/$(gh pr view <N> --repo <owner>/<repo> --json headRefName -q .headRefName)"
 ```
 
 The judge's worktree is based on the PR's head branch, so that re-running checks tests the PR and not `main`. Before a re-judge, the judge's worktree is reset to the new PR head.
@@ -126,7 +126,7 @@ After the implementation PR merges, a separate PR confined to `openspec/` archiv
   ```bash
   gh api -X PATCH repos/<owner>/<repo>/pulls/<N> -F body=@<file>.md
   ```
-- **Orca silently drops a launch prompt.** After launching, read the terminal; if the agent sits at an empty input, resend:
+- **Orca silently drops a launch prompt.** `scripts/loop-launch.sh` detects this: it reads the terminal until the agent shows activity, resends the prompt once with `--wait-submit`, and exits non-zero if no turn started. If you launched without the helper, or the helper failed, read the terminal yourself; if the agent sits at an empty input, resend:
   ```bash
   orca-ide terminal read --terminal <handle> --screen
   orca-ide terminal send --terminal <handle> --text "<prompt>" --enter
@@ -147,6 +147,7 @@ This file claims no execution of its own. Evidence for the checks that back it (
 - `.agents/loop/` (all templates and its `README.md`)
 - `.github/ISSUE_TEMPLATE/change.md` and `.github/pull_request_template.md`
 - `scripts/spec-lock.sh` and `scripts/test-spec-lock.sh`
+- `scripts/loop-launch.sh` and `scripts/test-loop-launch.sh` (launch helper and its simulation test)
 - the CI workflow `openspec` (validate, then the lock read from the base commit)
 
 **Adapt:**
