@@ -33,6 +33,6 @@
 ## 5. Verification
 
 - [x] 5.1 Run every `scripts/test-*.sh`. Check: all exit 0.
-- [ ] 5.2 Run `openspec validate --all --strict`. Check: exits zero.
-- [ ] 5.3 Run `BASE=origin/main bash scripts/spec-lock.sh`. Check: exits zero.
-- [ ] 5.4 Record in the PR description each command run with its output, and state any check not run. Check: Evidence section present.
+- [x] 5.2 Run `openspec validate --all --strict`. Check: exits zero.
+- [x] 5.3 Run `BASE=origin/main bash scripts/spec-lock.sh`. Check: exits zero.
+- [x] 5.4 Record in the PR description each command run with its output, and state any check not run. Check: Evidence section present.
