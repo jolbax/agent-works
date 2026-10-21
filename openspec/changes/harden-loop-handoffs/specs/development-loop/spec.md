@@ -47,10 +47,17 @@ With `approve` the line SHALL be `PR #<pr> at <sha7>: review, then type: approve
 - **WHEN** an apply or fix worker stops after pushing
 - **THEN** its comment says it is ready for the judge and does not contain `type: approve`
 
+### Requirement: Requested changes are made and re-announced
+When the operator asks for changes in a worker's terminal instead of approving, the propose, implement and archive worker SHALL make them within its MUST-NOT limits, push, and announce the new head again with `scripts/loop-await.sh` (`approve` for propose and archive, `judge` for implement). It SHALL NOT treat the request as an approval.
+
+#### Scenario: Operator asks for changes
+- **WHEN** the operator types a change request in the worker's terminal after the worker reached `in-review`
+- **THEN** the worker edits within its limits, pushes, and sets `in-review` again with the new head through `loop-await.sh`
+
 ## MODIFIED Requirements
 
 ### Requirement: Workers report their state in Orca
-`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
+`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. `<message>` SHALL contain at least one non-whitespace character and SHALL be passed to Orca unaltered. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
 
 #### Scenario: Worker waits for the operator
 - **WHEN** a propose or archive worker stops after opening or updating its PR
@@ -59,6 +66,14 @@ With `approve` the line SHALL be `PR #<pr> at <sha7>: review, then type: approve
 #### Scenario: Unknown status rejected
 - **WHEN** `loop-status.sh` is called with a status other than the four default ids
 - **THEN** it exits with code 2 and calls nothing
+
+#### Scenario: Blank message rejected
+- **WHEN** `loop-status.sh` is called with a message that is empty or only whitespace, for example `"   "`
+- **THEN** it exits with code 2 and calls nothing
+
+#### Scenario: Valid message not altered
+- **WHEN** `loop-status.sh` is called with a message that has leading or trailing whitespace and a non-whitespace character
+- **THEN** the message is passed to Orca exactly as given
 
 ### Requirement: Fix rounds are bounded
 After a judge reports blocking findings, at most two fix rounds SHALL occur, each a new builder prompt carrying the findings. The round number SHALL be the count of `Verdict: BLOCKING` comments on the PR. If blocking findings remain after the second, the operator SHALL decide.

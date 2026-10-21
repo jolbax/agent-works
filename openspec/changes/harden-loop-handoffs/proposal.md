@@ -8,6 +8,8 @@ The first end-to-end loop run with Orca workers (change `reject-blank-status-mes
 - Placeholder convention in every template: launch-time values stay `<name>`; runtime values the worker fills itself become `{name}` (for example `{N}`, `{sha7}`, `{merge-commit}`). `loop-prompt.sh` never replaces `{name}`. This ends `<merge-commit>` meaning two things in `apply.md`.
 - New `scripts/loop-await.sh <pr> approve|judge` confirms the PR head equals the local `HEAD` (polling up to 60 s, exit 1 if not), sets `in-review` through `loop-status.sh` and prints the line. All templates use it instead of building the line: propose and archive use `approve`; apply and fix use `judge`. Only the judge's own verdict line tells the operator to approve an implementation PR.
 - The fix round number is the count of `Verdict: BLOCKING` comments on the PR. Above 2 the builder does not fix and sets `in-review` "two fix rounds used; operator decides on GitHub".
+- When the operator asks for changes in a worker's terminal instead of approving, the propose, apply and archive templates have the worker make them within its MUST-NOT limits, push, and announce the new head again with `loop-await.sh`.
+- The MODIFIED "Workers report their state in Orca" carries the two scenarios ("Blank message rejected", "Valid message not altered") added by `reject-blank-status-message` (#19) word for word, so archiving both changes drops neither.
 - Simulation tests `scripts/test-loop-prompt.sh` and `scripts/test-loop-await.sh`, each failing when its key check is removed.
 - `docs/dev-loop.md` and `.agents/loop/README.md` describe the above. Note only: Orca marks a worktree unread when its agent finishes a turn, which can override `loop-status.sh --read`.
 
@@ -19,7 +21,7 @@ None.
 
 ### Modified Capabilities
 
-- `development-loop`: requirements "Workers report their state in Orca", "Fix rounds are bounded", "Fix rounds start in Orca", "Operator helpers are reproducible" change; new requirements "Launch prompts are built by a helper", "Launch-time and runtime placeholders are distinct", "Prompt helper selects the intake line", "Workers announce only a confirmed head" and "Hand-off line says who acts next".
+- `development-loop`: requirements "Workers report their state in Orca", "Fix rounds are bounded", "Fix rounds start in Orca", "Operator helpers are reproducible" change; new requirements "Launch prompts are built by a helper", "Launch-time and runtime placeholders are distinct", "Prompt helper selects the intake line", "Workers announce only a confirmed head" "Hand-off line says who acts next" and "Requested changes are made and re-announced".
 
 ## Impact
 

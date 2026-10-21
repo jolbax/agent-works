@@ -16,9 +16,11 @@
 - [ ] 3.2 Replace each template's own in-review line with `scripts/loop-await.sh {N} approve` (propose, archive) or `judge` (apply, fix). Check: `grep -rn "type: approve" .agents/loop` matches only `judge.md` and wording about the operator's reply.
 - [ ] 3.3 In apply.md and fix.md, set the round from the count of `Verdict: BLOCKING` comments and stop above 2 with "two fix rounds used; operator decides on GitHub". Check: both files contain the count command and the stop text.
 
+- [ ] 3.4 In propose.md, apply.md and archive.md, add the change-request step (make the changes within the MUST-NOT limits, push, run `loop-await.sh {N}` again with the template's mode). Check: `grep -c "loop-await.sh" .agents/loop/{propose,apply,archive}.md` shows at least 2 in each.
+
 ## 4. Documentation
 
-- [ ] 4.1 Update `docs/dev-loop.md` and `.agents/loop/README.md`: loop-prompt.sh usage and documented keys per template, the placeholder convention, loop-await.sh, the round count, and the note on Orca's unread marking. Check: `grep -n "loop-prompt.sh\|loop-await.sh" docs/dev-loop.md .agents/loop/README.md` matches both files.
+- [ ] 4.1 Update `docs/dev-loop.md` and `.agents/loop/README.md`: loop-prompt.sh usage and documented keys per template, the placeholder convention, loop-await.sh, the round count, the change-request step, and the note on Orca's unread marking. Check: `grep -n "loop-prompt.sh\|loop-await.sh" docs/dev-loop.md .agents/loop/README.md` matches both files.
 
 ## 5. Verification
 
