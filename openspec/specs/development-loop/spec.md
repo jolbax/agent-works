@@ -247,6 +247,14 @@ The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templat
 - **WHEN** `loop-status.sh` is called with a status other than the four default ids
 - **THEN** it exits with code 2 and calls nothing
 
+#### Scenario: Blank message rejected
+- **WHEN** `loop-status.sh` is called with a message that is empty or only whitespace, for example `"   "`
+- **THEN** it exits with code 2 and calls nothing
+
+#### Scenario: Valid message not altered
+- **WHEN** `loop-status.sh` is called with a message that has leading or trailing whitespace and a non-whitespace character
+- **THEN** the message is passed to Orca exactly as given
+
 ### Requirement: Orca metadata is a notification only
 GitHub SHALL remain the record of the loop. A failed status update SHALL NOT stop a worker's GitHub step, and the worker SHALL report the failure under "Not done / not run" in the PR description.
 
