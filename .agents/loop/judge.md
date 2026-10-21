@@ -1,6 +1,6 @@
 # Judge prompt
 
-Step: Judge (docs/dev-loop.md). Launched with a model different from the builder's, based on the PR's head branch, not `origin/main`: `git fetch origin && bash scripts/loop-launch.sh <change-name>-judge codex <prompt-file> --base-branch "origin/$(gh pr view <pr-number> --repo <owner>/<repo> --json headRefName -q .headRefName)"`.
+Step: Judge (docs/dev-loop.md). Build the prompt with `bash scripts/loop-prompt.sh .agents/loop/judge.md <prompt-file> owner=<owner> repo=<repo> change-name=<change-name> pr-number=<pr-number>`. Launched with a model different from the builder's, based on the PR's head branch, not `origin/main`: `git fetch origin && bash scripts/loop-launch.sh <change-name>-judge codex <prompt-file> --base-branch "origin/$(gh pr view <pr-number> --repo <owner>/<repo> --json headRefName -q .headRefName)"`.
 
 ---
 
@@ -17,9 +17,9 @@ Input: the approved change at `origin/main` (`openspec/changes/<change-name>/`) 
 
 MUST NOT: edit files, push, merge, run `scripts/loop-merge.sh`, send text to any terminal (`orca-ide terminal send`), or submit an approve or request-changes review.
 
-Post the verdict with `gh pr comment <pr-number> --repo <owner>/<repo> --body-file <file>` (a comment, because GitHub rejects approving one's own PR). Begin it with the verdict line `Verdict: PASS at <sha7>` or `Verdict: BLOCKING (<n> findings) at <sha7>`, where `<sha7>` is the first 7 characters of the head you confirmed in step 1. A verdict line without `at <sha7>` is not accepted by `scripts/loop-merge.sh`.
+Post the verdict with `gh pr comment <pr-number> --repo <owner>/<repo> --body-file {file}` (a comment, because GitHub rejects approving one's own PR). Begin it with the verdict line `Verdict: PASS at {sha7}` or `Verdict: BLOCKING ({n} findings) at {sha7}`, where `{sha7}` is the first 7 characters of the head you confirmed in step 1. A verdict line without `at {sha7}` is not accepted by `scripts/loop-merge.sh`.
 
 Then put the verdict on the builder's worktree in Orca. Use the full head branch name; a suffix does not resolve:
-`bash scripts/loop-status.sh in-review "<verdict line>; type: approve <sha7> | fix" --pr <pr-number> --worktree "branch:$(gh pr view <pr-number> --repo <owner>/<repo> --json headRefName -q .headRefName)"`. Use "type: approve <sha7>" for PASS and "type: fix" for BLOCKING. Then mark your own worktree done: `bash scripts/loop-status.sh completed "judged #<pr-number> at <sha7>"`. If either update fails, say so in your output; the PR comment still stands.
+`bash scripts/loop-status.sh in-review "{verdict-line}; type: approve {sha7} | fix" --pr <pr-number> --worktree "branch:$(gh pr view <pr-number> --repo <owner>/<repo> --json headRefName -q .headRefName)"`. Use "type: approve {sha7}" for PASS and "type: fix" for BLOCKING. Then mark your own worktree done: `bash scripts/loop-status.sh completed "judged #<pr-number> at {sha7}"`. If either update fails, say so in your output; the PR comment still stands.
 
 Print the comment URL and stop.
