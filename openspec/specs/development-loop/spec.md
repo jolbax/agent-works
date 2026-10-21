@@ -237,7 +237,7 @@ The repository SHALL provide `docs/dev-loop.md`, project-agnostic prompt templat
 - **THEN** its description lists each `orca-ide` flag the helper uses with the `--help` check that verified it
 
 ### Requirement: Workers report their state in Orca
-`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. `<message>` SHALL contain at least one non-whitespace character and SHALL be passed to Orca unaltered. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
+`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
 
 #### Scenario: Worker waits for the operator
 - **WHEN** a worker stops after opening or updating its PR
