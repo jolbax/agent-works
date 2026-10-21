@@ -21,9 +21,13 @@ jobs:
       # it is checked against. Agents' token cannot edit workflows at all.
       - name: Spec lock
         if: github.event_name == 'pull_request'
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+        # checkout gives refs/pull/N/merge: first parent = current base tip,
+        # second = PR head. pull_request.base.sha can be stale when the base
+        # moved while the PR was open, which made the lock see the base's own
+        # changes as part of the PR (seen on #22).
         run: |
+          BASE=$(git rev-parse HEAD^1)
+          export BASE
           if git cat-file -e "$BASE:scripts/spec-lock.sh" 2>/dev/null; then
             git show "$BASE:scripts/spec-lock.sh" > "$RUNNER_TEMP/spec-lock.sh"
           else
