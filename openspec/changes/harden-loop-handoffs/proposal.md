@@ -10,7 +10,9 @@ The first end-to-end loop run with Orca workers (change `reject-blank-status-mes
 - The fix round number is the count of `Verdict: BLOCKING` comments on the PR. Above 2 the builder does not fix and sets `in-review` "two fix rounds used; operator decides on GitHub".
 - When the operator asks for changes in a worker's terminal instead of approving, the propose, apply and archive templates have the worker make them within its MUST-NOT limits, push, and announce the new head again with `loop-await.sh`.
 - The MODIFIED "Workers report their state in Orca" carries the two scenarios ("Blank message rejected", "Valid message not altered") added by `reject-blank-status-message` (#19) word for word, so archiving both changes drops neither.
-- Simulation tests `scripts/test-loop-prompt.sh` and `scripts/test-loop-await.sh`, each failing when its key check is removed.
+- `openspec validate` does not measure MODIFIED requirement length, so overflow only shows at archive time (#14, #17, #23). New `scripts/spec-length.sh <change-dir>` lists requirements over 500 characters; propose.md tells the worker to keep every requirement under 500 characters and run it; archive.md tells the worker to shorten a synced requirement that fails strict validation for length, without changing its meaning, keep the diff in `openspec/`, and record it in the PR description.
+- The MODIFIED "Workers report their state in Orca" uses the wording of archive PR #23 (the "message SHALL contain" sentence is not in the requirement text; the two scenarios carry the behaviour).
+- Simulation tests `scripts/test-loop-prompt.sh` and `scripts/test-loop-await.sh`, plus `scripts/test-spec-length.sh`, each failing when its key check is removed.
 - `docs/dev-loop.md` and `.agents/loop/README.md` describe the above. Note only: Orca marks a worktree unread when its agent finishes a turn, which can override `loop-status.sh --read`.
 
 ## Capabilities
@@ -21,11 +23,11 @@ None.
 
 ### Modified Capabilities
 
-- `development-loop`: requirements "Workers report their state in Orca", "Fix rounds are bounded", "Fix rounds start in Orca", "Operator helpers are reproducible" change; new requirements "Launch prompts are built by a helper", "Launch-time and runtime placeholders are distinct", "Prompt helper selects the intake line", "Workers announce only a confirmed head" "Hand-off line says who acts next" and "Requested changes are made and re-announced".
+- `development-loop`: requirements "Workers report their state in Orca", "Fix rounds are bounded", "Fix rounds start in Orca", "Operator helpers are reproducible" change; new requirements "Launch prompts are built by a helper", "Launch-time and runtime placeholders are distinct", "Prompt helper selects the intake line", "Workers announce only a confirmed head" "Hand-off line says who acts next" "Requested changes are made and re-announced", "Spec requirement text stays under 500 characters" and "Archive shortens overlong synced requirements".
 
 ## Impact
 
-- New: `scripts/loop-prompt.sh`, `scripts/loop-await.sh`, `scripts/test-loop-prompt.sh`, `scripts/test-loop-await.sh`.
+- New: `scripts/loop-prompt.sh`, `scripts/loop-await.sh`, `scripts/spec-length.sh` and their `scripts/test-*.sh`.
 - Changed: `.agents/loop/*.md`, `.agents/loop/README.md`, `docs/dev-loop.md` (implementation PR, not this spec PR); `openspec/specs/development-loop/spec.md` at archive time.
 - Out of scope: behaviour of `loop-merge.sh`, `loop-status.sh`, `loop-launch.sh`; Orca itself.
 

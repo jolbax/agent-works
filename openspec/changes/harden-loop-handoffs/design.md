@@ -15,7 +15,8 @@ See proposal.md. Templates in `.agents/loop/` currently mix `<placeholders>` for
 4. **Template use.** propose and archive end with `approve`; apply and fix end with `judge`, after their last push. The judge's verdict line remains the only "type: approve" for an implementation PR.
 5. **Fix rounds.** On `fix`, the builder counts `Verdict: BLOCKING` comments (`gh pr view --json comments`, bodies starting with the line). That number is the round (`{round}`). Above 2 it sets `in-review` "two fix rounds used; operator decides on GitHub" and does not fix. If the newest verdict is not BLOCKING at the current head, there is nothing to fix and it says so.
 6. **Change requests.** In propose, apply and archive, a terminal message from the operator asking for changes (anything other than the exact `approve <sha>`) makes the worker edit within its MUST-NOT list, push, and call `loop-await.sh` again (`approve` for propose/archive, `judge` for apply). Specs for a modified requirement copy the other in-flight change's scenarios verbatim so archive order does not matter.
-7. **Tests** follow `test-loop-status.sh`: stub `gh`, `git` state and `loop-status.sh` path via env, one PASS/FAIL line per scenario.
+7. **Length check.** `scripts/spec-length.sh <change-dir>` reads each `specs/**/spec.md`, takes the text between a `### Requirement:` heading and its first `####` or next heading, and fails on more than 500 characters (the limit `openspec validate` applies to ADDED requirements). It is a script, not a prompt rule alone, because validate skips MODIFIED ones. Archive handles the remaining case by shortening after the sync.
+8. **Tests** follow `test-loop-status.sh`: stub `gh`, `git` state and `loop-status.sh` path via env, one PASS/FAIL line per scenario.
 
 ## Risks / Trade-offs
 

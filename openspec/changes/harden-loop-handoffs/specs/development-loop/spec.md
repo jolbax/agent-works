@@ -54,10 +54,24 @@ When the operator asks for changes in a worker's terminal instead of approving, 
 - **WHEN** the operator types a change request in the worker's terminal after the worker reached `in-review`
 - **THEN** the worker edits within its limits, pushes, and sets `in-review` again with the new head through `loop-await.sh`
 
+### Requirement: Spec requirement text stays under 500 characters
+The propose prompt SHALL tell the worker to keep every requirement text, including MODIFIED ones, under 500 characters and to check it with `scripts/spec-length.sh`, which SHALL list each requirement over the limit in the change's delta specs and exit non-zero.
+
+#### Scenario: Overlong MODIFIED requirement
+- **WHEN** a delta spec's MODIFIED requirement text exceeds 500 characters
+- **THEN** `scripts/spec-length.sh` names it and exits non-zero, although `openspec validate` does not
+
+### Requirement: Archive shortens overlong synced requirements
+If strict validation fails after the archive sync because a synced requirement is too long, the archive worker SHALL shorten it without changing its meaning, keep the diff inside `openspec/`, and record that in the PR description.
+
+#### Scenario: Sync produces an overlong requirement
+- **WHEN** `openspec validate --all --strict` fails after the sync on a requirement over 500 characters
+- **THEN** the worker shortens that requirement, the diff stays in `openspec/`, and the PR description records the shortening
+
 ## MODIFIED Requirements
 
 ### Requirement: Workers report their state in Orca
-`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. `<message>` SHALL contain at least one non-whitespace character and SHALL be passed to Orca unaltered. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
+`scripts/loop-status.sh <status> <message> [--pr <N>] [--issue <N>] [--worktree <selector>]` SHALL set a worktree's Orca status, comment and links, defaulting to the worktree containing the current directory. `<status>` SHALL be a default id (`todo`, `in-progress`, `in-review`, `completed`); only `in-review` marks it unread. Every worker except the judge SHALL set `in-progress` when it starts and `in-review` when it stops to wait for the operator.
 
 #### Scenario: Worker waits for the operator
 - **WHEN** a propose or archive worker stops after opening or updating its PR

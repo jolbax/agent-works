@@ -18,9 +18,17 @@
 
 - [ ] 3.4 In propose.md, apply.md and archive.md, add the change-request step (make the changes within the MUST-NOT limits, push, run `loop-await.sh {N}` again with the template's mode). Check: `grep -c "loop-await.sh" .agents/loop/{propose,apply,archive}.md` shows at least 2 in each.
 
+- [ ] 3.5 In propose.md, tell the worker to keep every requirement text under 500 characters and run `bash scripts/spec-length.sh openspec/changes/{change-name}`. Check: `grep -n "spec-length.sh" .agents/loop/propose.md` matches.
+- [ ] 3.6 In archive.md, add the shorten-after-sync step (meaning unchanged, diff in `openspec/`, recorded in the PR description). Check: `grep -n "500" .agents/loop/archive.md` matches.
+
+## 3a. Length check
+
+- [ ] 3a.1 Add `scripts/spec-length.sh` and `scripts/test-spec-length.sh` (stub change dir: one requirement at 500 characters passes, one at 501, including MODIFIED, fails and is named). Check: `bash scripts/test-spec-length.sh` exits 0; `bash scripts/spec-length.sh openspec/changes/harden-loop-handoffs` exits 0.
+- [ ] 3a.2 Confirm the test guards the limit. Check: with the comparison removed, `bash scripts/test-spec-length.sh` exits non-zero; restore afterwards.
+
 ## 4. Documentation
 
-- [ ] 4.1 Update `docs/dev-loop.md` and `.agents/loop/README.md`: loop-prompt.sh usage and documented keys per template, the placeholder convention, loop-await.sh, the round count, the change-request step, and the note on Orca's unread marking. Check: `grep -n "loop-prompt.sh\|loop-await.sh" docs/dev-loop.md .agents/loop/README.md` matches both files.
+- [ ] 4.1 Update `docs/dev-loop.md` and `.agents/loop/README.md`: loop-prompt.sh usage and documented keys per template, the placeholder convention, loop-await.sh, the round count, the change-request step, spec-length.sh, and the note on Orca's unread marking. Check: `grep -n "loop-prompt.sh\|loop-await.sh" docs/dev-loop.md .agents/loop/README.md` matches both files.
 
 ## 5. Verification
 
