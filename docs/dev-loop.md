@@ -2,7 +2,7 @@
 
 This document describes how this repository is *developed*: how a change moves from an idea to a merged, archived change using Orca worktrees, OpenSpec and GitHub. GitHub is the record and the enforcement layer: issues, pull requests, evidence, verdicts, CI, the spec lock and the ruleset. Orca is where the operator works: each worker reports its state on its worktree, and the operator answers in the worker's terminal. It is separate from the product's lifecycle contracts in [architecture.md](architecture.md), where "change", "stage attempt" and "approval" mean the factory's own records. Nothing here is a product design, and nothing here is part of the product's runtime.
 
-The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)), and the operator helpers [`scripts/loop-status.sh`](../scripts/loop-status.sh) and [`scripts/loop-merge.sh`](../scripts/loop-merge.sh) with their simulation tests. The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
+The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)), the operator helpers [`scripts/loop-status.sh`](../scripts/loop-status.sh) and [`scripts/loop-merge.sh`](../scripts/loop-merge.sh), the prompt and hand-off helpers [`scripts/loop-prompt.sh`](../scripts/loop-prompt.sh) and [`scripts/loop-await.sh`](../scripts/loop-await.sh), and the length check [`scripts/spec-length.sh`](../scripts/spec-length.sh), each with its test. The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
 
 The rules that agents must follow are repeated in [AGENTS.md](../AGENTS.md), which agents load automatically. This file is not loaded automatically.
 
@@ -57,13 +57,34 @@ Every worker except the judge sets its worktree's board status with `scripts/loo
 
 | Orca shows on the worktree | The operator |
 | --- | --- |
-| `PR #<N> at <sha7>: review, then type: approve <sha7>` | reviews the diff in Orca (for example `orca-ide file open-changed --mode diff --worktree <selector>`), then types `approve <sha7>` in that worker's terminal |
+| `PR #<N> at <sha7>: review, then type: approve <sha7>` (propose, archive) | reviews the diff in Orca (for example `orca-ide file open-changed --mode diff --worktree <selector>`), then types `approve <sha7>` in that worker's terminal |
+| `PR #<N> at <sha7>: ready for the judge (launch it, then wait for its verdict)` (builder) | launches the judge at that head (or types a change request) |
 | `Verdict: PASS at <sha7>; type: approve <sha7>` (builder) | types `approve <sha7>` in the builder's terminal |
 | `Verdict: BLOCKING (<n> findings) at <sha7>; type: fix` (builder) | types `fix` in the builder's terminal, then launches the re-judge |
 | a `loop-merge.sh` refusal | follows the reason (approve the new head, wait for CI, re-judge) |
 | `two fix rounds used; operator decides on GitHub` | decides on GitHub |
 
-The worker keeps waiting at its prompt after it stops, so the reply can come later. `scripts/loop-merge.sh <pr> <sha> [--dry-run]` exit codes: 0 merged (or would merge); 1 a `gh` call failed (never retried); 2 usage; 3 PR not open, wrong base or no `Kind:`; 4 the head moved since the approval; 5 the `openspec` check is missing, pending or failed; 6 implementation PR without `Verdict: PASS at <sha>` for the head.
+The worker keeps waiting at its prompt after it stops, so the reply can come later. Any other message in its terminal (besides `fix` for a builder) is a change request, never an approval: the propose, implement or archive worker makes the changes within its MUST-NOT limits, pushes, and announces the new head again with `loop-await.sh`. Orca marks a worktree unread when its agent finishes a turn, which can override the read mark that `loop-status.sh` sets. `scripts/loop-merge.sh <pr> <sha> [--dry-run]` exit codes: 0 merged (or would merge); 1 a `gh` call failed (never retried); 2 usage; 3 PR not open, wrong base or no `Kind:`; 4 the head moved since the approval; 5 the `openspec` check is missing, pending or failed; 6 implementation PR without `Verdict: PASS at <sha>` for the head.
+
+## Prompts and hand-offs
+
+Templates in [`.agents/loop/`](../.agents/loop/README.md) use two placeholder forms. `<name>` is filled at launch; `{name}` is a value the worker resolves while running (`{N}` its PR number, `{sha}` the approved head, `{merge-commit}` the merge commit, `{round}` the fix round). Build a launch prompt with the helper, never by hand:
+
+```bash
+bash scripts/loop-prompt.sh .agents/loop/<template>.md <prompt-file> key=value...
+```
+
+It takes the text after the template's first `---` line, replaces each `<key>` literally (one pass, values are not re-read), keeps every `{name}`, and for propose keeps the Intake line for the given `issue-number` or `brief` (exactly one; exit 2 otherwise). Any launch-time placeholder left unfilled is named on stderr with exit 1, and nothing is written. The documented keys per template are listed in [`.agents/loop/README.md`](../.agents/loop/README.md).
+
+A worker that stops for the operator announces its PR with:
+
+```bash
+bash scripts/loop-await.sh <N> approve|judge
+```
+
+It polls `gh pr view <N> --json headRefOid` for at most 60 seconds until it equals `git rev-parse HEAD`; otherwise it exits 1 and sets nothing. Then it sets `in-review` through `loop-status.sh` with the PR linked and prints the line. Propose and archive use `approve` (`PR #<N> at <sha7>: review, then type: approve <sha7>`). Apply and fix use `judge` (`PR #<N> at <sha7>: ready for the judge (launch it, then wait for its verdict)`), so for an implementation PR only the judge's verdict line asks for approval. Exit codes: 0 announced; 1 head not confirmed or `loop-status.sh` failed (the line is then not printed); 2 usage.
+
+`openspec validate` measures requirement length (500 characters) for ADDED requirements only, so a MODIFIED one overflows only at archive. The propose worker keeps every requirement under 500 characters and runs `bash scripts/spec-length.sh openspec/changes/<name>`, which names each requirement over the limit and exits 1. If strict validation still fails after the archive sync on a long requirement, the archive worker shortens it without changing its meaning, keeps the diff in `openspec/`, and records it in the PR description.
 
 ## The loop, step by step
 
@@ -82,6 +103,7 @@ Either open a GitHub issue from the change issue template (for example from a ph
 ### 2. Propose (Claude worker)
 
 ```bash
+bash scripts/loop-prompt.sh .agents/loop/propose.md <propose-prompt-file> owner=<owner> repo=<repo> change-name=<name> issue-number=<N>
 bash scripts/loop-launch.sh <name> claude <propose-prompt-file> --issue <N>
 ```
 
@@ -92,6 +114,7 @@ openspec new change <name>
 openspec status --change <name>
 openspec instructions <artifact> --change <name>
 openspec validate --all --strict
+bash scripts/spec-length.sh openspec/changes/<name>
 ```
 
 Anything the issue does not answer goes under "Open questions" in `proposal.md`.
@@ -106,10 +129,11 @@ Fetch, then create a new branch from `origin/main` after the merge; do not rebas
 
 ```bash
 git fetch origin
+bash scripts/loop-prompt.sh .agents/loop/apply.md <apply-prompt-file> owner=<owner> repo=<repo> change-name=<name> issue-number=<N> spec-pr-number=<spec-pr> spec-merge-commit=<sha> default-branch=main
 bash scripts/loop-launch.sh <name>-impl claude <apply-prompt-file> --base-branch origin/main
 ```
 
-The prompt comes from [`.agents/loop/apply.md`](../.agents/loop/apply.md) and carries the MUST-NOT list. The worker runs `/opsx:apply <name>`, ticks each task only after its stated check has passed, and opens a draft PR whose description holds the evidence.
+The prompt comes from [`.agents/loop/apply.md`](../.agents/loop/apply.md) and carries the MUST-NOT list. The worker runs `/opsx:apply <name>`, ticks each task only after its stated check has passed, and opens a draft PR whose description holds the evidence. It then runs `loop-await.sh <N> judge`.
 
 Use parallel workers only when task groups touch disjoint files, at most three at once; if two groups touch the same file, one worker does both:
 
@@ -131,7 +155,7 @@ The prompt comes from [`.agents/loop/judge.md`](../.agents/loop/judge.md); its f
 
 ### 6. Fix rounds
 
-For blocking findings, the operator types `fix` in the builder's terminal. The builder reads the newest verdict itself and follows [`.agents/loop/fix.md`](../.agents/loop/fix.md); a new builder prompt carrying the findings also works. Then judge again. After the second fix round, if blocking findings remain, no further round starts and the operator decides.
+For blocking findings, the operator types `fix` in the builder's terminal. The builder counts the comments on its PR that begin with `Verdict: BLOCKING`; that count is the fix round. Above 2 it does not fix and sets `in-review` with "two fix rounds used; operator decides on GitHub". Otherwise it reads the newest verdict itself and follows [`.agents/loop/fix.md`](../.agents/loop/fix.md) (if that verdict is not BLOCKING at the current head, there is nothing to fix and it says so); a prompt built from `fix.md` and sent to the builder also works. It ends with `loop-await.sh <N> judge`. Then judge again. After the second fix round, if blocking findings remain, no further round starts and the operator decides.
 
 ### 7. Ship (CI and operator)
 
@@ -173,6 +197,9 @@ This file claims no execution of its own. Evidence for the checks that back it (
 - `scripts/loop-launch.sh` and `scripts/test-loop-launch.sh` (launch helper and its simulation test)
 - `scripts/loop-status.sh` and `scripts/test-loop-status.sh` (Orca status helper and its simulation test)
 - `scripts/loop-merge.sh` and `scripts/test-loop-merge.sh` (head-bound merge helper and its simulation test)
+- `scripts/loop-prompt.sh` and `scripts/test-loop-prompt.sh` (prompt builder and its simulation test)
+- `scripts/loop-await.sh` and `scripts/test-loop-await.sh` (head-confirmed hand-off and its simulation test)
+- `scripts/spec-length.sh` and `scripts/test-spec-length.sh` (requirement length check and its test)
 - the CI workflow `openspec` (validate, then the lock read from the base commit)
 
 **Adapt:**
