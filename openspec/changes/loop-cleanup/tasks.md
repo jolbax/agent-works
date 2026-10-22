@@ -25,8 +25,8 @@
 
 - [x] 5.1 Run every `scripts/test-*.sh`. Check: all exit 0; output in the PR description labelled as simulations.
 - [ ] 5.2 Run a REAL `bash scripts/loop-start.sh cleanup --dry-run` from an Orca-registered worktree of the repository, and a real `bash scripts/loop-start.sh status`. Check: the dry run exits 0, lists as `remove` exactly the `completed` loop worktrees of reject-blank-status-message, harden-loop-handoffs and add-sdd-loop-skill, and keeps `main`, `jlb-ideation-phase` and every open worker (including this change's); both outputs are in the PR description, labelled as real runs. The real cleanup is not run.
-- [ ] 5.3 Run `openspec validate --all --strict`, `bash scripts/spec-length.sh openspec/changes/loop-cleanup` and `BASE=origin/main bash scripts/spec-lock.sh`. Check: all exit 0.
-- [ ] 5.4 Record in the PR description each command run with its output, the `--help` output of `orca-ide worktree rm` and `orca-ide terminal list`, and any check not run. Check: Evidence and "Not done / not run" sections present.
+- [x] 5.3 Run `openspec validate --all --strict`, `bash scripts/spec-length.sh openspec/changes/loop-cleanup` and `BASE=origin/main bash scripts/spec-lock.sh`. Check: all exit 0.
+- [x] 5.4 Record in the PR description each command run with its output, the `--help` output of `orca-ide worktree rm` and `orca-ide terminal list`, and any check not run. Check: Evidence and "Not done / not run" sections present.
 
 ## Workflow follow-up
 
