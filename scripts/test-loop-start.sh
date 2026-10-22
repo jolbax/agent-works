@@ -17,6 +17,7 @@ trap 'rm -rf "$work"' EXIT
 FIX=$work/fix LOG=$work/log
 SPEC_SHA=abc1234def5678901234567890abcdef12345678
 HEAD_SHA=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+MERGED_SHA=feedface00112233445566778899aabbccddeeff
 
 # Fake gh. Reads fixtures from $FIX; every call is appended to $LOG.
 #   repo.json            gh repo view (missing file: the call fails)
@@ -25,6 +26,7 @@ HEAD_SHA=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
 #   pr-<N>.json          gh pr view <N> (missing: "Could not resolve")
 #   view-<N>.json        gh pr view <N> --json headRefOid,... (status)
 #   issue-<N>.json       gh issue view <N> (missing: "Could not resolve")
+#   (cleanup reads a linked PR's state from pr-<N>.json)
 cat > "$work/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >> "$LOG"
@@ -42,20 +44,43 @@ case "$1 $2" in
 esac
 STUB
 
-# Fake git: fetch succeeds, the main worktree is /fake/agent-works, branches from $FIX/refs.
+# Fake git: fetch succeeds (unless $FIX/fetch-fail), the main worktree is
+# /fake/agent-works, branches from $FIX/refs. For cleanup:
+#   toplevel             rev-parse --show-toplevel (default: /fake/agent-works)
+#   tree                 ls-tree of the default branch
+#   head-<name>          HEAD of /fake/ws/<name> (default: $MERGED_SHA; "fail": the call fails)
+#   dirty-<name>         status --porcelain output of /fake/ws/<name>
+#   kept-branches        refs show-ref finds (one per line)
+# merge-base --is-ancestor succeeds only for $MERGED_SHA.
 cat > "$work/git" <<'STUB'
 #!/usr/bin/env bash
 echo "git $*" >> "$LOG"
+wt=""
+[ "$1" != -C ] || { wt=${2##*/}; shift 2; }
 case "$1" in
-  fetch) exit 0 ;;
-  rev-parse) echo /fake/agent-works/.git ;;
+  fetch) [ ! -f "$FIX/fetch-fail" ] || { echo "fatal: unable to access" >&2; exit 128; } ;;
+  rev-parse)
+    case "$*" in
+      *--show-toplevel*) cat "$FIX/toplevel" 2>/dev/null || echo /fake/agent-works ;;
+      *HEAD*) h=$(cat "$FIX/head-$wt" 2>/dev/null || echo "$MERGED_SHA"); [ "$h" != fail ] || exit 128; echo "$h" ;;
+      *) echo /fake/agent-works/.git ;;
+    esac ;;
   for-each-ref) cat "$FIX/refs" 2>/dev/null || true ;;
+  ls-tree) cat "$FIX/tree" ;;
+  merge-base) [ "$3" = "$MERGED_SHA" ] ;;
+  status) cat "$FIX/dirty-$wt" 2>/dev/null || true ;;
+  show-ref) grep -qxF -- "$4" "$FIX/kept-branches" 2>/dev/null || exit 1 ;;
   *) echo "unexpected git call: $*" >&2; exit 1 ;;
 esac
 STUB
 
 # Fake orca-ide: `worktree list` prints $FIX/worktrees.json (or, with $FIX/unregistered,
-# Orca's repo_not_found error); anything else is recorded and fails.
+# Orca's repo_not_found error). `worktree rm --worktree path:<p>` drops that row
+# ($FIX/rm-fail-<name>: exits 1 not ok; $FIX/rm-stays-<name>: reports ok, row
+# kept; $FIX/rm-dirties-<name>: names a worktree that gets uncommitted changes).
+# `terminal list` with $FIX/term-sets-status ("<name> <status>") first changes
+# that worktree's Orca status, as a worker would between two removals. `terminal list` prints $FIX/terminals.json (default: none). Anything
+# else is recorded and fails.
 cat > "$work/orca-ide" <<'STUB'
 #!/usr/bin/env bash
 echo "orca-ide $*" >> "$LOG"
@@ -63,6 +88,28 @@ case "$1 $2" in
   "worktree list")
     [ -f "$FIX/unregistered" ] && { echo '{"ok":false,"error":{"code":"repo_not_found","message":"repo_not_found"}}'; exit 1; }
     cat "$FIX/worktrees.json" ;;
+  "worktree rm")
+    p=${4#path:}; n=${p##*/}
+    [ ! -f "$FIX/rm-dirties-$n" ] || echo " M file" > "$FIX/dirty-$(cat "$FIX/rm-dirties-$n")"
+    [ ! -f "$FIX/rm-fail-$n" ] || { echo '{"ok":false,"error":{"code":"worktree_remove_failed","message":"fatal: worktree is locked"}}'; exit 1; }
+    [ -f "$FIX/rm-stays-$n" ] || python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["result"]["worktrees"] = [w for w in d["result"]["worktrees"] if w["path"] != sys.argv[2]]
+json.dump(d, open(sys.argv[1], "w"))
+' "$FIX/worktrees.json" "$p"
+    echo '{"ok":true,"result":{}}' ;;
+  "terminal list")
+    [ ! -f "$FIX/term-sets-status" ] || python3 -I -c '
+import json, sys
+n, st = open(sys.argv[2]).read().split()
+d = json.load(open(sys.argv[1]))
+for w in d["result"]["worktrees"]:
+    if w["path"].rsplit("/", 1)[-1] == n:
+        w["workspaceStatus"] = st
+json.dump(d, open(sys.argv[1], "w"))
+' "$FIX/worktrees.json" "$FIX/term-sets-status"
+    cat "$FIX/terminals.json" 2>/dev/null || echo '{"ok":true,"result":{"terminals":[],"truncated":false}}' ;;
   *) echo "unexpected orca-ide call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -114,12 +161,13 @@ fail=0 out="" rc=0
 # run <args...>: run the launcher against the stubs; sets $out and $rc.
 run() {
   rc=0
-  out=$(LOG=$LOG FIX=$FIX GH=$work/gh GIT=$work/git ORCA_IDE=$work/orca-ide \
+  out=$(LOG=$LOG FIX=$FIX MERGED_SHA=$MERGED_SHA GH=$work/gh GIT=$work/git ORCA_IDE=$work/orca-ide \
         LOOP_PROMPT=$work/loop-prompt.sh LOOP_LAUNCH=$work/loop-launch.sh TMPDIR=$work \
         bash "$HELPER" "$@" 2>&1) || rc=$?
 }
-# check <scenario> <want-exit> [has:<text>|not:<text>|log:<text>|nolog:<text>|lines:<n> ...]
-#   has/not search the output, log/nolog the call log; lines: number of log lines.
+# check <scenario> <want-exit> [has:<text>|not:<text>|next:<a>=><b>|log:<text>|nolog:<text>|lines:<n> ...]
+#   has/not search the output, next: the line after the first output line with <a>
+#   contains <b>, log/nolog search the call log; lines: number of log lines.
 check() {
   local name=$1 want=$2 ok=1 a; shift 2
   [ "$rc" = "$want" ] || ok=0
@@ -127,6 +175,7 @@ check() {
     case "$a" in
       has:*) grep -qF -- "${a#has:}" <<<"$out" || ok=0 ;;
       not:*) ! grep -qF -- "${a#not:}" <<<"$out" || ok=0 ;;
+      next:*) x=${a#next:}; grep -m1 -A1 -F -- "${x%%=>*}" <<<"$out" | sed -n 2p | grep -qF -- "${x#*=>}" || ok=0 ;;
       log:*) grep -qF -- "${a#log:}" "$LOG" || ok=0 ;;
       nolog:*) ! grep -qF -- "${a#nolog:}" "$LOG" || ok=0 ;;
       lines:*) [ "$(wc -l < "$LOG")" = "${a#lines:}" ] || ok=0 ;;
@@ -243,6 +292,7 @@ check "issue not usable (a pull request)" 7 nolog:"launch "
 usage_cases=(
   "" "frobnicate add-foo" "start" "start add-foo" "start add-foo --brief x --issue 3"
   "start add-foo --issue x" "implement" "implement Add_Foo" "archive add-foo extra" "judge abc" "status extra"
+  "cleanup --force" "cleanup extra" "cleanup --dry-run extra" "--dry-run cleanup --dry-run" "--dry-run status"
 )
 for args in "${usage_cases[@]}"; do
   fresh; : > "$LOG"
@@ -297,7 +347,7 @@ view 41 "$check_ok" '[{"createdAt":"2026-10-20T10:00:00Z","body":"Verdict: PASS 
 view 42 "$check_ok" '[{"createdAt":"2026-10-20T10:00:00Z","body":"Verdict: PASS at a1b2c3d\n\ndetails"}]'
 view 43 "$check_ok" '[]'
 run status
-check "worker waits for the operator" 0 has:"ACT in the terminal of add-foo: PR #14 at a1b2c3d: review, then type: approve a1b2c3d" \
+check "worker waits for the operator" 0 has:"-> ACT: type approve a1b2c3d in the terminal of add-foo" \
   has:"add-bar-impl  [in-progress]" not:"add-baz-impl" has:"1 completed not listed" not:"agent-works  [" has:"approve <sha>' and 'fix'"
 check "implementation PR without a verdict at its head" 0 has:"ACT: judge it with /sdd-loop judge 40" has:"ACT: judge it with /sdd-loop judge 41" \
   not:"judge 42" not:"judge 14" not:"#50" has:"openspec: missing" has:"not at head a1b2c3d"
@@ -311,7 +361,170 @@ check "comment: ready for the judge" 0 has:"-> ACT: judge it with /sdd-loop judg
 check "comment: verdict BLOCKING, type: fix" 0 has:"-> ACT in the terminal of add-v-impl: Verdict: BLOCKING (2 findings) at a1b2c3d; type: fix"
 check "comment: verdict PASS, type: approve" 0 has:"-> ACT in the terminal of add-p-impl: Verdict: PASS at a1b2c3d; type: approve a1b2c3d"
 
+# Spec or archive PR awaiting approval: the PR line and the worktree line give the same action.
+# approval_case <scenario> <statusCheckRollup> <comment-sha> <want...>
+approval_case() {
+  local scenario=$1 rollup=$2 sha=$3; shift 3
+  fresh
+  worktrees "$(wt add-foo in-review "PR #14 at $sha: review, then type: approve $sha" 2)" \
+    "$(wt add-zap-archive in-review "PR #15 at $sha: review, then type: approve $sha" 1)"
+  join '{"number":14,"title":"spec: add-foo","headRefName":"jolbax/add-foo"}' \
+       '{"number":15,"title":"archive: add-zap","headRefName":"jolbax/add-zap-archive"}' > "$FIX/open.json"
+  view 14 "$rollup" '[]'; view 15 "$rollup" '[]'
+  run status
+  check "$scenario" 0 "$@"
+}
+approval_case "spec or archive PR awaiting approval, CI green" "$check_ok" a1b2c3d \
+  next:"#14 spec: add-foo  head a1b2c3d  openspec: SUCCESS  verdict: none=>-> ACT: type approve a1b2c3d in the terminal of add-foo" \
+  next:"#15 archive: add-zap  head a1b2c3d  openspec: SUCCESS  verdict: none=>-> ACT: type approve a1b2c3d in the terminal of add-zap-archive" \
+  next:"  add-foo  [in-review]  PR #14 at a1b2c3d: review, then type: approve a1b2c3d=>-> ACT: type approve a1b2c3d in the terminal of add-foo" not:"no action" not:"wait for CI"
+for ci in missing pending failed; do
+  case $ci in
+    missing) rollup='[]' state=missing ;;
+    pending) rollup='[{"__typename":"CheckRun","name":"openspec","status":"IN_PROGRESS","conclusion":""}]' state=IN_PROGRESS ;;
+    failed) rollup='[{"__typename":"CheckRun","name":"openspec","status":"COMPLETED","conclusion":"FAILURE"}]' state=FAILURE ;;
+  esac
+  approval_case "spec or archive PR awaiting approval, CI not green ($ci)" "$rollup" a1b2c3d \
+    next:"  #14 spec: add-foo  head a1b2c3d  openspec: $state  verdict: none=>-> ACT: wait for CI (openspec: $state on a1b2c3d), then type approve a1b2c3d in the terminal of add-foo" \
+    next:"  add-foo  [in-review]  PR #14 at a1b2c3d: review, then type: approve a1b2c3d=>-> ACT: wait for CI (openspec: $state on a1b2c3d), then type approve a1b2c3d in the terminal of add-foo" \
+    has:"-> ACT: wait for CI (openspec: $state on a1b2c3d), then type approve a1b2c3d in the terminal of add-zap-archive" \
+    not:"-> ACT: type approve" not:"no action"
+done
+approval_case "announced head is not the PR head" "$check_ok" 0badbad \
+  next:"#14 spec: add-foo  head a1b2c3d  openspec: SUCCESS  verdict: none=>-> no action" next:"#15 archive: add-zap  head a1b2c3d  openspec: SUCCESS  verdict: none=>-> no action" not:"ACT: type approve" not:"wait for CI"
+
 bad=$(grep -vE '^(orca-ide worktree list |gh pr list --state open |gh pr view [0-9]+ --json headRefOid,statusCheckRollup,comments$|git rev-parse )' "$LOG" || true)
 if [ -z "$bad" ]; then echo "PASS status is read only"; else echo "FAIL status is read only: unexpected calls:"; sed 's/^/    /' <<<"$bad"; fail=1; fi
+
+# --- Cleanup removes only finished loop worktrees ---
+# cw <name> [status] [linked-pr]: one Orca worktree row with branch jolbax/<name>
+# (status "null": no status).
+cw() {
+  local st=${2:-completed}
+  [ "$st" = null ] || st="\"$st\""
+  printf '{"path":"/fake/ws/%s","branch":"refs/heads/jolbax/%s","isMainWorktree":false,"workspaceStatus":%s,"comment":"","linkedPR":%s,"lastActivityAt":0}' \
+    "$1" "$1" "$st" "${3:-null}"
+}
+# changes <dir...>: change directories on origin/main (ls-tree output).
+changes() {
+  local d
+  : > "$FIX/tree"
+  printf '100644 blob %s\topenspec/changes/archive/.gitkeep\n' "$SPEC_SHA" >> "$FIX/tree"
+  for d in "$@"; do printf '040000 tree %s\topenspec/changes/%s\n' "$SPEC_SHA" "$d" >> "$FIX/tree"; done
+}
+# cfresh [row...]: fixtures for cleanup with change add-foo (archived) and add-bar (active).
+cfresh() { fresh; changes archive archive/2026-10-22-add-foo add-bar; worktrees "$@"; }
+pr_state() { printf '{"state":"%s"}' "$2" > "$FIX/pr-$1.json"; }
+# only reads may be logged by a dry run
+readonly_log() {
+  grep -vE '^(git fetch origin$|gh repo view |orca-ide worktree list |git rev-parse |git ls-tree |git -C /fake/ws/[^ ]+ (rev-parse HEAD|status --porcelain)|git merge-base --is-ancestor |gh pr view [0-9]+ --json state$)' "$LOG" || true
+}
+
+cfresh "$(cw add-foo-judge-2)"
+run cleanup --dry-run
+check "finished worker passes every rule" 0 has:"add-foo-judge-2  remove" has:"agent-works  keep: main worktree" has:"1 to remove, 1 kept"
+
+cfresh "$(cw add-foo-impl)"; echo /fake/ws/add-foo-impl > "$FIX/toplevel"
+run cleanup --dry-run
+check "rule: current worktree" 0 has:"add-foo-impl  keep: current worktree" has:"0 to remove, 2 kept"
+for st in in-progress in-review todo null; do
+  cfresh "$(cw add-foo-impl "$st")"
+  run cleanup --dry-run
+  want=$st; [ "$st" != null ] || want=none
+  check "rule: status $want" 0 has:"add-foo-impl  keep: status $want, not completed" has:"0 to remove"
+done
+cfresh "$(cw jlb-ideation-phase)" "$(cw add-foo-notes)"
+run cleanup --dry-run
+check "rule: not a loop worker name" 0 has:"jlb-ideation-phase  keep: not a loop worker name" has:"add-foo-notes  keep: not a loop worker name" \
+  has:"0 to remove, 3 kept" nolog:"git -C"
+cfresh "$(cw add-foo-impl)"; echo 0123456789abcdef0123456789abcdef01234567 > "$FIX/head-add-foo-impl"
+run cleanup --dry-run
+check "rule: HEAD not merged" 0 has:"add-foo-impl  keep: HEAD 0123456 not merged into origin/main" nolog:"gh pr view" nolog:"status --porcelain"
+cfresh "$(cw add-foo-impl completed 20)" "$(cw add-foo completed 19)" "$(cw add-foo-archive completed 21)"
+pr_state 20 OPEN; pr_state 19 MERGED; pr_state 21 CLOSED
+run cleanup --dry-run
+check "rule: linked PR open" 0 has:"add-foo-impl  keep: linked PR #20 is OPEN" has:"add-foo  remove" has:"add-foo-archive  remove" \
+  log:"gh pr view 20 --json state" nolog:"git -C /fake/ws/add-foo-impl status"
+for kind in uncommitted untracked; do
+  cfresh "$(cw add-foo-impl)"
+  if [ "$kind" = uncommitted ]; then echo " M scripts/x.sh" > "$FIX/dirty-add-foo-impl"; else echo "?? notes.txt" > "$FIX/dirty-add-foo-impl"; fi
+  run cleanup --dry-run
+  check "rule: $kind files" 0 has:"add-foo-impl  keep: uncommitted changes" has:"0 to remove" log:"git -C /fake/ws/add-foo-impl status --porcelain"
+done
+cfresh "$(cw add-foo-impl in-progress 20)"; echo "?? x" > "$FIX/dirty-add-foo-impl"; pr_state 20 OPEN
+echo 0123456789abcdef0123456789abcdef01234567 > "$FIX/head-add-foo-impl"
+run cleanup --dry-run
+check "first failing rule is the reason" 0 has:"add-foo-impl  keep: status in-progress, not completed" not:"HEAD 0123456" not:"uncommitted" nolog:"git -C"
+cfresh "$(cw add-bar)" "$(cw add-bar-impl)" "$(cw add-bar-judge)" "$(cw add-bar-judge-3)" "$(cw add-bar-archive)" "$(cw add-foo-judge-2)" \
+  "$(cw add-bar-judge-1)" "$(cw add-bar-judge-x)" "$(cw add-bar-notes)" "$(cw add-baz-impl)" "$(cw archive)" "$(cw jlb-ideation-phase)"
+run cleanup --dry-run
+check "loop worker names" 0 has:"add-bar  remove" has:"add-bar-impl  remove" has:"add-bar-judge  remove" has:"add-bar-judge-3  remove" \
+  has:"add-bar-archive  remove" has:"add-foo-judge-2  remove" has:"add-bar-judge-1  keep: not a loop worker name" \
+  has:"add-bar-judge-x  keep: not a loop worker name" has:"add-bar-notes  keep: not a loop worker name" \
+  has:"add-baz-impl  keep: not a loop worker name" has:"archive  keep: not a loop worker name" \
+  has:"jlb-ideation-phase  keep: not a loop worker name" has:"6 to remove, 7 kept"
+
+for case in fetch repo orca ls-tree pr head; do
+  cfresh "$(cw add-foo-impl completed 20)" "$(cw add-foo-judge)"; pr_state 20 MERGED
+  case $case in
+    fetch) touch "$FIX/fetch-fail" ;;
+    repo) rm "$FIX/repo.json" ;;
+    orca) touch "$FIX/unregistered" ;;
+    ls-tree) rm "$FIX/tree" ;;
+    pr) rm "$FIX/pr-20.json" ;;
+    head) echo fail > "$FIX/head-add-foo-judge" ;;
+  esac
+  run cleanup
+  check "fetch or lookup fails ($case)" 1 has:"loop-start: " not:"removed " nolog:"worktree rm"
+done
+
+# --- Cleanup dry run removes nothing ---
+for form in "cleanup --dry-run" "--dry-run cleanup"; do
+  cfresh "$(cw add-foo-impl)" "$(cw add-bar-judge in-review)"
+  # shellcheck disable=SC2086
+  run $form
+  check "dry-run listing ($form)" 0 has:"agent-works  keep: main worktree" has:"add-foo-impl  remove" \
+    has:"add-bar-judge  keep: status in-review, not completed" has:"1 to remove, 2 kept" has:"dry run: nothing removed" not:"removed "
+  bad=$(readonly_log)
+  if [ -z "$bad" ]; then echo "PASS nothing changed ($form)"; else echo "FAIL nothing changed ($form): unexpected calls:"; sed 's/^/    /' <<<"$bad"; fail=1; fi
+done
+
+# --- Cleanup removes without force and reports what remains ---
+cfresh "$(cw add-foo-judge-2)" "$(cw add-bar-impl in-progress)"
+run cleanup
+check "finished worker removed" 0 has:"add-foo-judge-2  remove" \
+  has:"removed add-foo-judge-2: branch jolbax/add-foo-judge-2 deleted; terminals: none" has:"cleanup: 1 removed (add-foo-judge-2)" \
+  log:"orca-ide worktree rm --worktree path:/fake/ws/add-foo-judge-2 --json" nolog:"--force" nolog:"git push" nolog:"git branch" \
+  nolog:"worktree rm --worktree path:/fake/ws/add-bar-impl" log:"git show-ref --verify --quiet refs/heads/jolbax/add-foo-judge-2" \
+  log:"orca-ide terminal list --json"
+cfresh "$(cw add-foo-impl)" "$(cw add-foo-archive)"
+echo refs/heads/jolbax/add-foo-impl > "$FIX/kept-branches"
+printf '{"ok":true,"result":{"terminals":[%s,%s,%s],"truncated":false}}' \
+  '{"handle":"term_a","worktreePath":"/fake/ws/add-foo-impl"}' '{"handle":"term_b","worktreePath":"/fake/ws/add-foo-impl"}' \
+  '{"handle":"term_c","worktreePath":"/fake/agent-works"}' > "$FIX/terminals.json"
+run cleanup
+check "branch kept and terminal left behind" 0 has:"removed add-foo-impl: branch jolbax/add-foo-impl kept; terminals: term_a, term_b" \
+  has:"removed add-foo-archive: branch jolbax/add-foo-archive deleted; terminals: none" has:"cleanup: 2 removed (add-foo-impl add-foo-archive)" not:"term_c"
+cfresh "$(cw add-foo-impl)" "$(cw add-foo-archive)"; echo add-foo-archive > "$FIX/rm-dirties-add-foo-impl"
+run cleanup
+check "rules evaluated again before each removal" 0 has:"add-foo-archive  remove" has:"removed add-foo-impl:" \
+  has:"add-foo-archive  keep: uncommitted changes (changed since the list)" nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
+cfresh "$(cw add-foo-impl)" "$(cw add-foo-archive)"; echo "add-foo-archive in-progress" > "$FIX/term-sets-status"
+run cleanup
+check "worker that changed its Orca status after the last list is kept" 0 has:"removed add-foo-impl:" \
+  has:"add-foo-archive  keep: status in-progress, not completed (changed since the list)" not:"removed add-foo-archive" \
+  nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
+
+# --- Cleanup stops at the first failed removal ---
+for case in fail stays; do
+  cfresh "$(cw add-foo)" "$(cw add-foo-impl)" "$(cw add-foo-archive)"
+  touch "$FIX/rm-$case-add-foo-impl"
+  run cleanup
+  if [ "$case" = fail ]; then scenario="second removal fails" why="exited 1: fatal: worktree is locked"
+  else scenario="removal reported but still listed" why="still listed by orca-ide worktree list after removal"; fi
+  check "$scenario" 8 has:"removed add-foo:" has:"cleanup: removal of add-foo-impl failed: " has:"$why" \
+    has:"; 1 removed (add-foo), not attempted: add-foo-archive" not:"removed add-foo-archive" \
+    log:"worktree rm --worktree path:/fake/ws/add-foo-impl --json" nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
+done
 
 [ "$fail" = 0 ] && echo "test-loop-start: all scenarios passed (simulation)" || { echo "test-loop-start: FAILED" >&2; exit 1; }

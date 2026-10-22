@@ -8,6 +8,7 @@
 #   bash scripts/loop-start.sh [--dry-run] judge <pr>
 #   bash scripts/loop-start.sh [--dry-run] archive <change>
 #   bash scripts/loop-start.sh status
+#   bash scripts/loop-start.sh [--dry-run] cleanup [--dry-run]
 #
 # A launch runs `git fetch origin`, derives owner, repo and default branch with
 # `gh repo view`, finds PRs by the exact titles the templates prescribe
@@ -26,6 +27,20 @@
 # prompt path and the launch command instead of launching. `status` is read
 # only: it lists the loop worktrees and open loop PRs and where the operator acts.
 #
+# `cleanup` runs `git fetch origin` and `gh repo view`, then removes an Orca
+# worktree of the repository only if all of these hold, checked in this order
+# (the first failing rule is printed as the keep reason): not the main worktree
+# nor the one this script runs in; status `completed`; name `<change>`,
+# `<change>-impl`, `<change>-judge`, `<change>-judge-<N>` or `<change>-archive`
+# of a change directory on origin/<default>; HEAD an ancestor of
+# origin/<default>; linked PR, if any, MERGED or CLOSED; no uncommitted or
+# untracked files. --dry-run prints `<name>  remove` or `<name>  keep: <reason>`
+# for every worktree and removes nothing. The real run prints the same list,
+# evaluates the rules again before each removal, removes with
+# `orca-ide worktree rm --worktree path:<path> --json` (never forced), and
+# reports per worktree whether its local branch was deleted or kept and which
+# Orca terminals remain for its path. It deletes no remote branch.
+#
 # This script never approves, merges or writes to an existing terminal; the
 # operator types `approve <sha>` and `fix` in the worker's own terminal.
 #
@@ -33,8 +48,9 @@
 # loop-prompt.sh or loop-launch.sh call failed; 2 usage; 3 no merged spec PR
 # (implement); 4 no open implementation PR (judge); 5 implementation PR not
 # merged (archive); 6 worktree or branch of the worker's name present; 7 intake
-# issue missing or closed. Nothing is launched on a non-zero exit before the
-# launch itself.
+# issue missing or closed; 8 a cleanup removal failed (no further worktree
+# attempted). Nothing is launched or removed on a non-zero exit before the
+# launch or removal itself.
 #
 # Environment (all optional; tests point them at stubs):
 #   GH, GIT, ORCA_IDE        commands (default: gh, git, orca-ide)
@@ -58,6 +74,7 @@ usage: loop-start.sh [--dry-run] start <change> (--brief <text> | --issue <N>)
        loop-start.sh [--dry-run] judge <pr>
        loop-start.sh [--dry-run] archive <change>
        loop-start.sh status
+       loop-start.sh [--dry-run] cleanup [--dry-run]
 EOF
   exit 2
 }
@@ -95,6 +112,9 @@ case "$verb" in
     pr=$1; number "$pr" "PR" ;;
   status)
     [ "$#" = 0 ] && [ "$dry" = 0 ] || usage ;;
+  cleanup)
+    if [ "$#" = 1 ] && [ "$1" = --dry-run ] && [ "$dry" = 0 ]; then dry=1; shift; fi
+    [ "$#" = 0 ] || usage ;;
   *) usage ;;
 esac
 
@@ -150,25 +170,9 @@ loop = [w for w in wts if not w.get("isMainWorktree")]
 done = [w for w in loop if w.get("workspaceStatus") == "completed"]
 active = sorted((w for w in loop if w.get("workspaceStatus") != "completed"),
                 key=lambda w: w.get("lastActivityAt") or 0, reverse=True)
-print(f"Worktrees ({len(active)} listed, {len(done)} completed not listed):")
-for w in active:
-    status, comment = w.get("workspaceStatus") or "none", w.get("comment") or ""
-    print(f"  {name(w)}  [{status}]  {comment or '(no comment)'}")
-    # Only a "type: approve <sha>" or "type: fix" line is a reply typed in that
-    # worktree's terminal; "ready for the judge" asks the operator to launch the judge.
-    if status != "in-review":
-        print("    -> no action")
-    elif "ready for the judge" in comment:
-        m = re.search(r"PR #(\d+)", comment)
-        n = m.group(1) if m else (str(w["linkedPR"]) if w.get("linkedPR") else "<PR>")
-        print(f"    -> ACT: judge it with /sdd-loop judge {n} (bash scripts/loop-start.sh judge {n})")
-    elif re.search(r"type: (approve [0-9a-fA-F]{7,40}|fix)\b", comment):
-        print(f"    -> ACT in the terminal of {name(w)}: {comment}")
-    else:
-        print(f"    -> ACT: {comment}")
 pat = re.compile(r"^(?:\*\*)?Verdict:\s*(.*?)\s+at\s+([0-9a-fA-F]{7,40})\b")
 loop_prs = [p for p in prs if p["title"].startswith(("spec: ", "impl: ", "archive: "))]
-print(f"Open loop PRs ({len(loop_prs)}):")
+info = {}
 for p in loop_prs:
     v = json.load(open(os.path.join(work, f"pr-{p['number']}.json")))
     head = v["headRefOid"].lower()
@@ -186,8 +190,51 @@ for p in loop_prs:
         verdict, at_head = f"{line} ({'at head' if head.startswith(at) else 'not at head ' + head[:7]})", head.startswith(at)
     else:
         verdict, at_head = "none", False
+    info[p["number"]] = (head, ci, verdict, at_head)
+# A spec or archive PR whose worker waits for "type: approve <sha7>" at the PR
+# head: the PR line and the worktree line give the same action, and say to wait
+# for CI while the required check has not succeeded on the head (loop-merge.sh
+# would refuse the approval with exit 5).
+pr_act, wt_act = {}, {}
+for w in active:
+    comment = w.get("comment") or ""
+    m = re.search(r"type: approve ([0-9a-fA-F]{7,40})\b", comment)
+    if w.get("workspaceStatus") != "in-review" or not m:
+        continue
+    r = re.search(r"PR #(\d+)", comment)
+    n = int(w["linkedPR"]) if w.get("linkedPR") else (int(r.group(1)) if r else None)
+    p = next((p for p in loop_prs if p["number"] == n and p["title"].startswith(("spec: ", "archive: "))), None)
+    sha = m.group(1).lower()
+    if p is None or not info[n][0].startswith(sha):
+        continue
+    head, ci = info[n][0], info[n][1]
+    then = f"type approve {sha} in the terminal of {name(w)}"
+    act = f"ACT: {then}" if ci == "SUCCESS" else f"ACT: wait for CI ({check}: {ci} on {head[:7]}), then {then}"
+    pr_act.setdefault(n, act)
+    wt_act[name(w)] = act
+print(f"Worktrees ({len(active)} listed, {len(done)} completed not listed):")
+for w in active:
+    status, comment = w.get("workspaceStatus") or "none", w.get("comment") or ""
+    print(f"  {name(w)}  [{status}]  {comment or '(no comment)'}")
+    # Only a "type: approve <sha>" or "type: fix" line is a reply typed in that
+    # worktree's terminal; "ready for the judge" asks the operator to launch the judge.
+    if status != "in-review":
+        print("    -> no action")
+    elif name(w) in wt_act:
+        print(f"    -> {wt_act[name(w)]}")
+    elif "ready for the judge" in comment:
+        m = re.search(r"PR #(\d+)", comment)
+        n = m.group(1) if m else (str(w["linkedPR"]) if w.get("linkedPR") else "<PR>")
+        print(f"    -> ACT: judge it with /sdd-loop judge {n} (bash scripts/loop-start.sh judge {n})")
+    elif re.search(r"type: (approve [0-9a-fA-F]{7,40}|fix)\b", comment):
+        print(f"    -> ACT in the terminal of {name(w)}: {comment}")
+    else:
+        print(f"    -> ACT: {comment}")
+print(f"Open loop PRs ({len(loop_prs)}):")
+for p in loop_prs:
+    head, ci, verdict, at_head = info[p["number"]]
     print(f"  #{p['number']} {p['title']}  head {head[:7]}  {check}: {ci}  verdict: {verdict}")
-    act = "no action"
+    act = pr_act.get(p["number"], "no action")
     if p["title"].startswith("impl: ") and not at_head:
         change = p["title"][len("impl: "):]
         judging = [w for w in active if w.get("workspaceStatus") == "in-progress"
@@ -212,6 +259,173 @@ print(d["nameWithOwner"], d["defaultBranchRef"]["name"])
 ' <<<"$repo_json") || fail "cannot read gh repo view result"
 [[ "$owner_repo" == */* ]] && [ -n "$default_branch" ] || fail "cannot read gh repo view result"
 owner=${owner_repo%%/*} repo=${owner_repo#*/}
+
+# --- cleanup: remove finished loop worktrees ---
+if [ "$verb" = cleanup ]; then
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  orca_worktrees > "$work/list.json"
+  current=$("$GIT_CMD" rev-parse --show-toplevel) || fail "git rev-parse --show-toplevel failed"
+  "$GIT_CMD" ls-tree "origin/$default_branch" openspec/changes/ openspec/changes/archive/ > "$work/tree" \
+    || fail "git ls-tree origin/$default_branch failed"
+
+  # rows <list.json>: one tab-separated line per worktree: name, path, branch,
+  # linked PR and the keep reason of rules 1-3 ("-" when none applies).
+  rows() {
+    python3 -I - "$1" "$work/tree" "$current" <<'PY' || fail "cannot read orca-ide worktree list or git ls-tree result"
+import json, os, re, sys
+wts = json.load(open(sys.argv[1]))
+changes = set()
+for line in open(sys.argv[2]):
+    meta, _, path = line.rstrip("\n").partition("\t")
+    parts = path.rstrip("/").split("/")
+    if meta.split()[1:2] != ["tree"] or parts[:2] != ["openspec", "changes"]:
+        continue
+    if len(parts) == 3 and parts[2] != "archive":
+        changes.add(parts[2])
+    elif len(parts) == 4 and parts[2] == "archive":
+        m = re.fullmatch(r"\d{4}-\d{2}-\d{2}-(.+)", parts[3])
+        if m:
+            changes.add(m.group(1))
+def loop_name(n):
+    if n in changes or any(n.endswith(s) and n[:-len(s)] in changes for s in ("-impl", "-judge", "-archive")):
+        return True
+    m = re.fullmatch(r"(.+)-judge-([1-9][0-9]*)", n)
+    return bool(m and int(m.group(2)) >= 2 and m.group(1) in changes)
+cur = os.path.realpath(sys.argv[3])
+for w in wts:
+    path = w["path"].rstrip("/")
+    name = path.rsplit("/", 1)[-1]
+    status = w.get("workspaceStatus") or "none"
+    if w.get("isMainWorktree"):
+        reason = "main worktree"
+    elif os.path.realpath(path) == cur:
+        reason = "current worktree"
+    elif status != "completed":
+        reason = f"status {status}, not completed"
+    elif not loop_name(name):
+        reason = "not a loop worker name"
+    else:
+        reason = "-"
+    print(name, path, w.get("branch") or "-", w.get("linkedPR") or "-", reason, sep="\t")
+PY
+  }
+
+  # decide <path> <linked-pr> <reason of rules 1-3>: sets $reason to the first
+  # failing rule, or to "" when every rule holds. A failing call exits 1.
+  decide() {
+    local path=$1 n=$2 head rc=0 state dirty
+    reason=$3
+    [ "$reason" = - ] || return 0
+    reason=""
+    head=$("$GIT_CMD" -C "$path" rev-parse HEAD) || fail "git rev-parse HEAD in $path failed"
+    "$GIT_CMD" merge-base --is-ancestor "$head" "origin/$default_branch" || rc=$?
+    case $rc in
+      0) ;;
+      1) reason="HEAD ${head:0:7} not merged into origin/$default_branch"; return 0 ;;
+      *) fail "git merge-base --is-ancestor failed for $path" ;;
+    esac
+    if [ "$n" != - ]; then
+      state=$("$GH_CMD" pr view "$n" --json state | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["state"])') \
+        || fail "gh pr view #$n failed"
+      case $state in
+        MERGED|CLOSED) ;;
+        *) reason="linked PR #$n is $state"; return 0 ;;
+      esac
+    fi
+    dirty=$("$GIT_CMD" -C "$path" status --porcelain --untracked-files=normal) || fail "git status in $path failed"
+    [ -z "$dirty" ] || reason="uncommitted changes"
+  }
+
+  rows "$work/list.json" > "$work/rows"
+  : > "$work/remove"
+  n_rm=0 n_keep=0
+  while IFS=$'\t' read -r -u 3 name path branch linked pre; do
+    decide "$path" "$linked" "$pre"
+    if [ -z "$reason" ]; then
+      echo "$name  remove"
+      printf '%s\t%s\t%s\n' "$name" "$path" "$branch" >> "$work/remove"
+      n_rm=$((n_rm + 1))
+    else
+      echo "$name  keep: $reason"
+      n_keep=$((n_keep + 1))
+    fi
+  done 3< "$work/rows"
+  echo "$n_rm to remove, $n_keep kept"
+  if [ "$dry" = 1 ]; then
+    echo "dry run: nothing removed"
+    exit 0
+  fi
+
+  mapfile -t todo < "$work/remove"
+  removed=()
+  for i in "${!todo[@]}"; do
+    IFS=$'\t' read -r name path branch <<<"${todo[$i]}"
+    # The rules again, on a list read just now: a worktree that changed is kept.
+    orca_worktrees > "$work/list.json"
+    rows "$work/list.json" > "$work/rows"
+    line=$(awk -F'\t' -v p="$path" '$2 == p' "$work/rows")
+    if [ -z "$line" ]; then echo "$name  keep: no longer listed"; continue; fi
+    IFS=$'\t' read -r _ _ _ linked pre <<<"$line"
+    decide "$path" "$linked" "$pre"
+    if [ -n "$reason" ]; then echo "$name  keep: $reason (changed since the list)"; continue; fi
+
+    rm_rc=0 msg=""
+    rm_out=$("$ORCA" worktree rm --worktree "path:$path" --json 2>"$work/rm.err") || rm_rc=$?
+    rm_err=$(python3 -I -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except ValueError:
+    print("unparsable result"); sys.exit()
+if d.get("ok") is not True:
+    print((d.get("error") or {}).get("message") or "not ok")
+' "$rm_out")
+    if [ "$rm_rc" != 0 ]; then
+      msg="orca-ide worktree rm exited $rm_rc: $rm_err $(head -c 300 "$work/rm.err")"
+    elif [ -n "$rm_err" ]; then
+      msg="orca-ide worktree rm reported: $rm_err"
+    else
+      orca_worktrees > "$work/list.json"
+      if python3 -I -c '
+import json, sys
+sys.exit(0 if any(w["path"].rstrip("/") == sys.argv[2] for w in json.load(open(sys.argv[1]))) else 1)
+' "$work/list.json" "$path"; then
+        msg="still listed by orca-ide worktree list after removal"
+      fi
+    fi
+    if [ -n "$msg" ]; then
+      rest=()
+      for j in "${!todo[@]}"; do [ "$j" -le "$i" ] || rest+=("${todo[$j]%%$'\t'*}"); done
+      echo "cleanup: removal of $name failed: $msg; ${#removed[@]} removed (${removed[*]:-none}), not attempted: ${rest[*]:-none}" >&2
+      exit 8
+    fi
+    removed+=("$name")
+
+    if [ "$branch" = - ]; then
+      b="none"
+    else
+      rc=0
+      "$GIT_CMD" show-ref --verify --quiet "$branch" || rc=$?
+      case $rc in
+        0) b="${branch#refs/heads/} kept" ;;
+        1) b="${branch#refs/heads/} deleted" ;;
+        *) fail "git show-ref for $branch failed after removing $name" ;;
+      esac
+    fi
+    terms=$("$ORCA" terminal list --json | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+if d.get("ok") is not True or d["result"].get("truncated"):
+    sys.exit(1)
+h = [t["handle"] for t in d["result"]["terminals"] if (t.get("worktreePath") or "").rstrip("/") == sys.argv[1]]
+print(", ".join(h) or "none")
+' "$path") || fail "orca-ide terminal list failed after removing $name"
+    echo "removed $name: branch $b; terminals: $terms"
+  done
+  echo "cleanup: ${#removed[@]} removed (${removed[*]:-none})"
+  exit 0
+fi
 
 # find_pr <title>: newest merged PR with exactly that title. Prints
 # "<number> <merge-commit> <issue-or-none>" on line 1 (or "none") and the other
