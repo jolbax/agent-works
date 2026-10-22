@@ -2,7 +2,7 @@
 
 This document describes how this repository is *developed*: how a change moves from an idea to a merged, archived change using Orca worktrees, OpenSpec and GitHub. GitHub is the record and the enforcement layer: issues, pull requests, evidence, verdicts, CI, the spec lock and the ruleset. Orca is where the operator works: each worker reports its state on its worktree, and the operator answers in the worker's terminal. It is separate from the product's lifecycle contracts in [architecture.md](architecture.md), where "change", "stage attempt" and "approval" mean the factory's own records. Nothing here is a product design, and nothing here is part of the product's runtime.
 
-The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)), the operator helpers [`scripts/loop-status.sh`](../scripts/loop-status.sh) and [`scripts/loop-merge.sh`](../scripts/loop-merge.sh), the prompt and hand-off helpers [`scripts/loop-prompt.sh`](../scripts/loop-prompt.sh) and [`scripts/loop-await.sh`](../scripts/loop-await.sh), and the length check [`scripts/spec-length.sh`](../scripts/spec-length.sh), each with its test. The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
+The loop is a portable kit: this file, the prompt templates in [`.agents/loop/`](../.agents/loop/README.md), the issue and pull request templates in `.github/`, the spec lock ([`scripts/spec-lock.sh`](../scripts/spec-lock.sh)) and its regression script ([`scripts/test-spec-lock.sh`](../scripts/test-spec-lock.sh)), the operator helpers [`scripts/loop-status.sh`](../scripts/loop-status.sh) and [`scripts/loop-merge.sh`](../scripts/loop-merge.sh), the prompt and hand-off helpers [`scripts/loop-prompt.sh`](../scripts/loop-prompt.sh) and [`scripts/loop-await.sh`](../scripts/loop-await.sh), the `sdd-loop` skill (`.claude/skills/sdd-loop/SKILL.md`, `.agents/skills/sdd-loop/SKILL.md`) and its launcher [`scripts/loop-start.sh`](../scripts/loop-start.sh), and the length check [`scripts/spec-length.sh`](../scripts/spec-length.sh), each with its test. The spec is the `development-loop` capability of the change `adopt-sdd-loop`.
 
 The rules that agents must follow are repeated in [AGENTS.md](../AGENTS.md), which agents load automatically. This file is not loaded automatically.
 
@@ -66,6 +66,26 @@ Every worker except the judge sets its worktree's board status with `scripts/loo
 
 The worker keeps waiting at its prompt after it stops, so the reply can come later. Any other message in its terminal (besides `fix` for a builder) is a change request, never an approval: the propose, implement or archive worker makes the changes within its MUST-NOT limits, pushes, and announces the new head again with `loop-await.sh`. Orca marks a worktree unread when its agent finishes a turn, which can override the read mark that `loop-status.sh` sets. `scripts/loop-merge.sh <pr> <sha> [--dry-run]` exit codes: 0 merged (or would merge); 1 a `gh` call failed (never retried); 2 usage; 3 PR not open, wrong base or no `Kind:`; 4 the head moved since the approval; 5 the `openspec` check is missing, pending or failed; 6 implementation PR without `Verdict: PASS at <sha>` for the head.
 
+## Starting steps: the sdd-loop skill
+
+The normal way to start a step is to ask an agent opened in the repository's main worktree in Orca, in plain words or with `/sdd-loop <verb>`. The skill `sdd-loop` (identical at `.claude/skills/sdd-loop/SKILL.md` for Claude Code and `.agents/skills/sdd-loop/SKILL.md` for Codex; not `loop`, which Claude Code ships built in) maps each request to one call of `scripts/loop-start.sh` and reports its output:
+
+| Request | Command |
+| --- | --- |
+| `start <change>: <brief>` / `start <change> from issue <N>` | `bash scripts/loop-start.sh start <change> --brief "<brief>"` / `--issue <N>` |
+| `implement <change>` | `bash scripts/loop-start.sh implement <change>` |
+| `judge <PR>` | `bash scripts/loop-start.sh judge <PR>` |
+| `archive <change>` | `bash scripts/loop-start.sh archive <change>` |
+| `status` | `bash scripts/loop-start.sh status` |
+
+`loop-start.sh` runs `git fetch origin`, derives owner, repository and default branch with `gh repo view`, finds the spec or implementation PR by its exact title (`spec: <change>`, `impl: <change>`; the newest in the required state is used and others are named) and the issue from the PR body's `Refs #<N>` line, builds the prompt with `loop-prompt.sh` into a `mktemp` file outside the repository, and launches with `loop-launch.sh`: propose as `<change>`, implement as `<change>-impl`, judge as `<change>-judge` or the lowest free `<change>-judge-<N>` from 2, archive as `<change>-archive`; agent `claude`, or `codex` for the judge; base `origin/<default branch>`, or `origin/<PR head branch>` for the judge; `--issue <N>` when known. It prints the worker name, terminal handle and the operator's next action. `--dry-run` derives and checks everything and builds the prompt, then prints the prompt path and the launch command without launching. `status` is read only: it lists the repository's Orca worktrees other than the main one that are not `completed` (with status and comment), and the open `spec:`, `impl:` and `archive:` PRs with the `openspec` check and the newest `Verdict:` line, and says where the operator acts (an `in-review` worktree's comment, in that worktree's terminal; `judge <PR>` for an implementation PR without a verdict at its head and no judge in progress).
+
+Exit codes: 0 launched, dry run done or status shown; 1 a `gh`, git, Orca, `loop-prompt.sh` or `loop-launch.sh` call failed; 2 usage; 3 no merged spec PR (implement); 4 no open implementation PR (judge); 5 implementation PR not merged (archive); 6 a worktree or branch of the worker's name exists (a branch named `<name>` or ending in `/<name>`); 7 intake issue missing or closed. A merged PR without a `Refs #<N>` line refuses with 3 or 5. Refusals happen before any worktree exists. If `loop-launch.sh` fails, the worktree may exist: `loop-start.sh` exits 1, prints the manual read-and-resend fallback, and neither retries nor removes it.
+
+The skill and `loop-start.sh` only launch workers and report status. They never approve, merge, run `loop-merge.sh`, send text to a terminal, set a worktree's status or edit repository files; `approve <sha>` and `fix` stay the operator's messages in the worker's own terminal. Like Rule 7, this is a convention for the agent running the skill, not an enforced control.
+
+The manual commands in each step below remain the fallback, for example when the skill is not installed.
+
 ## Prompts and hand-offs
 
 Templates in [`.agents/loop/`](../.agents/loop/README.md) use two placeholder forms. `<name>` is filled at launch; `{name}` is a value the worker resolves while running (`{N}` its PR number, `{sha}` the approved head, `{merge-commit}` the merge commit, `{round}` the fix round). Build a launch prompt with the helper, never by hand:
@@ -98,9 +118,11 @@ Then add `scripts/spec-lock.sh`, a CI workflow that runs `openspec validate --al
 
 ### 1. Intake (operator)
 
-Either open a GitHub issue from the change issue template (for example from a phone), or launch the propose worker from Orca with a `<brief>` instead of an issue number; the worker then files the issue itself with `gh issue create`. Either way the decisions are answered up front. Agents do not wait for answers mid-run.
+Either open a GitHub issue from the change issue template (for example from a phone) and start the propose worker with `/sdd-loop start <name> from issue <N>`, or start it with a brief, `/sdd-loop start <name>: <brief>`; the worker then files the issue itself with `gh issue create`. Either way the decisions are answered up front. Agents do not wait for answers mid-run.
 
 ### 2. Propose (Claude worker)
+
+Start it with the skill: `/sdd-loop start <name> from issue <N>` or `/sdd-loop start <name>: <brief>` (`bash scripts/loop-start.sh start <name> --issue <N>` or `--brief "<brief>"`). Manual fallback:
 
 ```bash
 bash scripts/loop-prompt.sh .agents/loop/propose.md <propose-prompt-file> owner=<owner> repo=<repo> change-name=<name> issue-number=<N>
@@ -125,7 +147,7 @@ The operator reviews the spec in Orca and types `approve <sha7>` in the propose 
 
 ### 4. Implement (Claude worker)
 
-Fetch, then create a new branch from `origin/main` after the merge; do not rebase the spec branch, and never pass a bare `main` as the base:
+Start it with the skill: `/sdd-loop implement <name>` (`bash scripts/loop-start.sh implement <name>`), which derives the issue, spec PR and merge commit. It creates a new branch from `origin/main` after the merge; do not rebase the spec branch, and never pass a bare `main` as the base. Manual fallback:
 
 ```bash
 git fetch origin
@@ -143,6 +165,8 @@ orca-ide orchestration worker-start --worktree new-child --base-branch origin/ma
 ```
 
 ### 5. Judge (Codex worker)
+
+Start it with the skill: `/sdd-loop judge <N>` (`bash scripts/loop-start.sh judge <N>`), which picks the next free judge name. Manual fallback:
 
 ```bash
 git fetch origin
@@ -163,7 +187,7 @@ The operator types `approve <sha7>` in the builder's terminal once the verdict i
 
 ### 8. Archive (Claude worker)
 
-After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `openspec archive <name> -y` headless and asks no questions. `openspec archive -y` does not refuse open tasks, so the worker first checks `tasks.md` for unchecked boxes (`grep -nE '^\s*- \[ \]'`); if any exist it does not archive, lists them under "Not done" in the PR description and stops for the operator to decide. It is not part of the implementation PR, which would sync specs for unmerged work. Like every other PR, the archive PR waits at `in-review` in Orca and merges on the operator's `approve <sha7>` in the archive worker's terminal.
+Start it with the skill: `/sdd-loop archive <name>` (`bash scripts/loop-start.sh archive <name>`), which derives the implementation PR and issue; the manual fallback is the `loop-launch.sh` command in [`.agents/loop/README.md`](../.agents/loop/README.md). After the implementation PR merges, a separate PR confined to `openspec/` archives the change and syncs specs ([`.agents/loop/archive.md`](../.agents/loop/archive.md)); the worker runs `openspec archive <name> -y` headless and asks no questions. `openspec archive -y` does not refuse open tasks, so the worker first checks `tasks.md` for unchecked boxes (`grep -nE '^\s*- \[ \]'`); if any exist it does not archive, lists them under "Not done" in the PR description and stops for the operator to decide. It is not part of the implementation PR, which would sync specs for unmerged work. Like every other PR, the archive PR waits at `in-review` in Orca and merges on the operator's `approve <sha7>` in the archive worker's terminal.
 
 ## Failure handling
 
@@ -200,6 +224,8 @@ This file claims no execution of its own. Evidence for the checks that back it (
 - `scripts/loop-prompt.sh` and `scripts/test-loop-prompt.sh` (prompt builder and its simulation test)
 - `scripts/loop-await.sh` and `scripts/test-loop-await.sh` (head-confirmed hand-off and its simulation test)
 - `scripts/spec-length.sh` and `scripts/test-spec-length.sh` (requirement length check and its test)
+- `.claude/skills/sdd-loop/SKILL.md` and `.agents/skills/sdd-loop/SKILL.md` (the `sdd-loop` skill, identical content)
+- `scripts/loop-start.sh` and `scripts/test-loop-start.sh` (launcher and its simulation test)
 - the CI workflow `openspec` (validate, then the lock read from the base commit)
 
 **Adapt:**
