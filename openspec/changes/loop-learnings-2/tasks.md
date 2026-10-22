@@ -23,7 +23,7 @@
 - [x] 4.1 Run every `scripts/test-*.sh`. Check: all exit 0; output in the PR description labelled as simulations.
 - [ ] 4.2 From an Orca-registered worktree of the repository, run REAL `bash scripts/loop-start.sh --dry-run implement <change>` and `bash scripts/loop-start.sh --dry-run amend <change> --brief "<text>"` against GitHub, for a change whose spec PR is merged and whose directory is on `origin/main` (this change, after its spec PR merged). Check: both exit 0 and print the prompt path and the `loop-launch.sh` command (the amend one with `<change>-amend` or the next free amend name); both outputs are in the PR description, labelled as real runs. Nothing is launched.
 - [x] 4.3 Run `openspec validate --all --strict`, `bash scripts/spec-length.sh openspec/changes/loop-learnings-2` and `BASE=origin/main bash scripts/spec-lock.sh`. Check: all exit 0.
-- [ ] 4.4 Record in the PR description each command run with its output and any check not run. Check: Evidence and "Not done / not run" sections present.
+- [x] 4.4 Record in the PR description each command run with its output and any check not run. Check: Evidence and "Not done / not run" sections present.
 
 ## Workflow follow-up
 
