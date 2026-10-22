@@ -20,7 +20,9 @@ usage() { echo "usage: spec-length.sh <change-dir>" >&2; exit 2; }
 [ "$#" -eq 1 ] || usage
 dir=${1%/}
 [ -d "$dir/specs" ] || { echo "spec-length: no specs/ directory in '$dir'" >&2; exit 2; }
-mapfile -t specs < <(find "$dir/specs" -name spec.md -type f | sort)
+# A read loop, not a bash 4 builtin: this script runs on bash 3.2 (macOS) too.
+specs=()
+while IFS= read -r f; do specs+=("$f"); done < <(find "$dir/specs" -name spec.md -type f | sort)
 [ "${#specs[@]}" -gt 0 ] || { echo "spec-length: no spec.md under '$dir/specs'" >&2; exit 2; }
 
 limit=500 over=0 count=0
