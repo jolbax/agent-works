@@ -6,14 +6,17 @@
 #   bash scripts/loop-start.sh [--dry-run] start <change> (--brief <text> | --issue <N>)
 #   bash scripts/loop-start.sh [--dry-run] implement <change>
 #   bash scripts/loop-start.sh [--dry-run] judge <pr>
+#   bash scripts/loop-start.sh [--dry-run] amend <change> --brief <text>
 #   bash scripts/loop-start.sh [--dry-run] archive <change>
 #   bash scripts/loop-start.sh status
 #   bash scripts/loop-start.sh [--dry-run] cleanup [--dry-run]
 #
 # A launch runs `git fetch origin`, derives owner, repo and default branch with
 # `gh repo view`, finds PRs by the exact titles the templates prescribe
-# (`spec: <change>`, `impl: <change>`) and the issue from the PR body's
-# `Refs #<N>` line, refuses what it cannot derive, builds the prompt with
+# (`spec: <change>`, `impl: <change>`) in `gh pr list --state all --limit 200`
+# (newest first, with no search query, so a PR merged a moment ago is found while
+# GitHub's search index lags) and the issue from the PR body's `Refs #<N>`
+# line, refuses what it cannot derive, builds the prompt with
 # loop-prompt.sh into a mktemp file outside the repository, and launches with
 # loop-launch.sh:
 #
@@ -21,6 +24,7 @@
 #   start      propose.md  <change>                  claude  origin/<default>
 #   implement  apply.md    <change>-impl             claude  origin/<default>
 #   judge      judge.md    <change>-judge[-N]        codex   origin/<PR head branch>
+#   amend      amend.md    <change>-amend[-N]        claude  origin/<default>
 #   archive    archive.md  <change>-archive          claude  origin/<default>
 #
 # --dry-run does everything up to and including the prompt, then prints the
@@ -31,8 +35,8 @@
 # worktree of the repository only if all of these hold, checked in this order
 # (the first failing rule is printed as the keep reason): not the main worktree
 # nor the one this script runs in; status `completed`; name `<change>`,
-# `<change>-impl`, `<change>-judge`, `<change>-judge-<N>` or `<change>-archive`
-# of a change directory on origin/<default>; HEAD an ancestor of
+# `<change>-impl`, `<change>-judge`, `<change>-judge-<N>`, `<change>-amend`,
+# `<change>-amend-<N>` or `<change>-archive` of a change directory on origin/<default>; HEAD an ancestor of
 # origin/<default>; linked PR, if any, MERGED or CLOSED; no uncommitted or
 # untracked files. --dry-run prints `<name>  remove` or `<name>  keep: <reason>`
 # for every worktree and removes nothing. The real run prints the same list,
@@ -46,10 +50,10 @@
 #
 # Exit codes: 0 launched, dry run done or status shown; 1 a gh, git, Orca,
 # loop-prompt.sh or loop-launch.sh call failed; 2 usage; 3 no merged spec PR
-# (implement); 4 no open implementation PR (judge); 5 implementation PR not
-# merged (archive); 6 worktree or branch of the worker's name present; 7 intake
-# issue missing or closed; 8 a cleanup removal failed (no further worktree
-# attempted). Nothing is launched or removed on a non-zero exit before the
+# (implement, amend); 4 no open implementation PR (judge); 5 implementation PR
+# not merged (archive); 6 worktree or branch of the worker's name present; 7
+# intake issue missing or closed; 8 a cleanup removal failed (no further
+# worktree attempted); 9 change directory not on origin/<default> (amend). Nothing is launched or removed on a non-zero exit before the
 # launch or removal itself.
 #
 # Environment (all optional; tests point them at stubs):
@@ -72,6 +76,7 @@ usage() {
 usage: loop-start.sh [--dry-run] start <change> (--brief <text> | --issue <N>)
        loop-start.sh [--dry-run] implement <change>
        loop-start.sh [--dry-run] judge <pr>
+       loop-start.sh [--dry-run] amend <change> --brief <text>
        loop-start.sh [--dry-run] archive <change>
        loop-start.sh status
        loop-start.sh [--dry-run] cleanup [--dry-run]
@@ -104,6 +109,18 @@ case "$verb" in
     kebab "$change"
     [ "$have_brief" = 1 ] && { [[ "$brief" =~ [^[:space:]] ]] || { echo "loop-start: --brief must not be empty" >&2; exit 2; }; }
     [ -z "$issue" ] || number "$issue" "--issue" ;;
+  amend)
+    [ "$#" -ge 1 ] || usage
+    change=$1; shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --brief) [ "$#" -ge 2 ] && [ "$have_brief" = 0 ] || usage; brief=$2; have_brief=1; shift 2 ;;
+        *) usage ;;
+      esac
+    done
+    [ "$have_brief" = 1 ] || { echo "loop-start: amend needs --brief <what to change>" >&2; exit 2; }
+    kebab "$change"
+    [[ "$brief" =~ [^[:space:]] ]] || { echo "loop-start: --brief must not be empty" >&2; exit 2; } ;;
   implement|archive)
     [ "$#" = 1 ] || usage
     change=$1; kebab "$change" ;;
@@ -154,7 +171,7 @@ if [ "$verb" = status ]; then
   numbers=$(python3 -I -c '
 import json, sys
 for p in json.load(open(sys.argv[1])):
-    if p["title"].startswith(("spec: ", "impl: ", "archive: ")):
+    if p["title"].startswith(("spec: ", "amend: ", "impl: ", "archive: ")):
         print(p["number"])
 ' "$work/prs.json") || fail "cannot read gh pr list result"
   for n in $numbers; do
@@ -171,7 +188,7 @@ done = [w for w in loop if w.get("workspaceStatus") == "completed"]
 active = sorted((w for w in loop if w.get("workspaceStatus") != "completed"),
                 key=lambda w: w.get("lastActivityAt") or 0, reverse=True)
 pat = re.compile(r"^(?:\*\*)?Verdict:\s*(.*?)\s+at\s+([0-9a-fA-F]{7,40})\b")
-loop_prs = [p for p in prs if p["title"].startswith(("spec: ", "impl: ", "archive: "))]
+loop_prs = [p for p in prs if p["title"].startswith(("spec: ", "amend: ", "impl: ", "archive: "))]
 info = {}
 for p in loop_prs:
     v = json.load(open(os.path.join(work, f"pr-{p['number']}.json")))
@@ -191,7 +208,7 @@ for p in loop_prs:
     else:
         verdict, at_head = "none", False
     info[p["number"]] = (head, ci, verdict, at_head)
-# A spec or archive PR whose worker waits for "type: approve <sha7>" at the PR
+# A spec, amend or archive PR whose worker waits for "type: approve <sha7>" at the PR
 # head: the PR line and the worktree line give the same action, and say to wait
 # for CI while the required check has not succeeded on the head (loop-merge.sh
 # would refuse the approval with exit 5).
@@ -203,7 +220,7 @@ for w in active:
         continue
     r = re.search(r"PR #(\d+)", comment)
     n = int(w["linkedPR"]) if w.get("linkedPR") else (int(r.group(1)) if r else None)
-    p = next((p for p in loop_prs if p["number"] == n and p["title"].startswith(("spec: ", "archive: "))), None)
+    p = next((p for p in loop_prs if p["number"] == n and p["title"].startswith(("spec: ", "amend: ", "archive: "))), None)
     sha = m.group(1).lower()
     if p is None or not info[n][0].startswith(sha):
         continue
@@ -288,9 +305,9 @@ for line in open(sys.argv[2]):
         if m:
             changes.add(m.group(1))
 def loop_name(n):
-    if n in changes or any(n.endswith(s) and n[:-len(s)] in changes for s in ("-impl", "-judge", "-archive")):
+    if n in changes or any(n.endswith(s) and n[:-len(s)] in changes for s in ("-impl", "-judge", "-amend", "-archive")):
         return True
-    m = re.fullmatch(r"(.+)-judge-([1-9][0-9]*)", n)
+    m = re.fullmatch(r"(.+)-(?:judge|amend)-([1-9][0-9]*)", n)
     return bool(m and int(m.group(2)) >= 2 and m.group(1) in changes)
 cur = os.path.realpath(sys.argv[3])
 for w in wts:
@@ -428,11 +445,13 @@ print(", ".join(h) or "none")
 fi
 
 # find_pr <title>: newest merged PR with exactly that title. Prints
-# "<number> <merge-commit> <issue-or-none>" on line 1 (or "none") and the other
-# PRs with that title on line 2.
+# "<number> <merge-commit> <issue-or-none>" on line 1 (or "none"), the other
+# PRs with that title on line 2, and on line 3 a note when the list was full
+# and held no PR with that title. Lists PRs with no search query: the search index
+# lags behind merges, the PR list does not.
 find_pr() {
   local list
-  list=$("$GH_CMD" pr list --state all --limit 50 --search "\"$1\" in:title" --json number,title,state,mergedAt,mergeCommit,body) \
+  list=$("$GH_CMD" pr list --state all --limit 200 --json number,title,state,mergedAt,mergeCommit,body) \
     || fail "gh pr list for '$1' failed"
   python3 -I -c '
 import json, re, sys
@@ -446,7 +465,20 @@ if merged:
 else:
     print("none")
 print(", ".join("#%d (%s)" % (p["number"], p["state"]) for p in exact if not merged or p is not merged[0]))
+print("only the newest 200 PRs were listed" if not exact and len(prs) >= 200 else "")
 ' "$1" <<<"$list" || fail "cannot read gh pr list result for '$1'"
+}
+
+# lookup <title>: runs find_pr and sets found_pr, found_commit, found_issue,
+# others (other PRs with that title) and missing (the refusal's suffix).
+lookup() {
+  local found
+  found=$(find_pr "$1")
+  read -r found_pr found_commit found_issue <<<"$(sed -n 1p <<<"$found")"
+  others=$(sed -n 2p <<<"$found")
+  local window
+  window=$(sed -n 3p <<<"$found")
+  missing="${others:+ (found: $others)}${window:+ ($window)}"
 }
 
 agent=claude base="origin/$default_branch" keys=() others=""
@@ -472,21 +504,29 @@ print(d["state"] if "/issues/" in d.get("url", "") else "NOT_AN_ISSUE")
     fi ;;
   implement)
     template=apply name=$change-impl
-    found=$(find_pr "spec: $change")
-    read -r spec_pr spec_commit issue <<<"${found%%$'\n'*}"
-    others=""; [[ "$found" != *$'\n'* ]] || others=${found#*$'\n'}
-    [ "$spec_pr" != none ] || refuse 3 "no merged PR titled exactly 'spec: $change'${others:+ (found: $others)}"
+    lookup "spec: $change"
+    spec_pr=$found_pr spec_commit=$found_commit issue=$found_issue
+    [ "$spec_pr" != none ] || refuse 3 "no merged PR titled exactly 'spec: $change'$missing"
     [ "$spec_commit" != - ] || fail "merged PR #$spec_pr has no merge commit in gh's result"
     [ "$issue" != none ] || refuse 3 "merged spec PR #$spec_pr has no 'Refs #<N>' line in its body"
     keys+=("issue-number=$issue" "spec-pr-number=$spec_pr" "spec-merge-commit=$spec_commit" "default-branch=$default_branch") ;;
   archive)
     template=archive name=$change-archive
-    found=$(find_pr "impl: $change")
-    read -r impl_pr _ issue <<<"${found%%$'\n'*}"
-    others=""; [[ "$found" != *$'\n'* ]] || others=${found#*$'\n'}
-    [ "$impl_pr" != none ] || refuse 5 "no merged PR titled exactly 'impl: $change'${others:+ (found: $others)}"
+    lookup "impl: $change"
+    impl_pr=$found_pr issue=$found_issue
+    [ "$impl_pr" != none ] || refuse 5 "no merged PR titled exactly 'impl: $change'$missing"
     [ "$issue" != none ] || refuse 5 "merged implementation PR #$impl_pr has no 'Refs #<N>' line in its body"
     keys+=("issue-number=$issue" "impl-pr-number=$impl_pr") ;;
+  amend)
+    template=amend
+    lookup "spec: $change"
+    spec_pr=$found_pr issue=$found_issue
+    [ "$spec_pr" != none ] || refuse 3 "no merged PR titled exactly 'spec: $change'$missing"
+    [ "$issue" != none ] || refuse 3 "merged spec PR #$spec_pr has no 'Refs #<N>' line in its body"
+    tree=$("$GIT_CMD" ls-tree "origin/$default_branch" "openspec/changes/$change/") \
+      || fail "git ls-tree origin/$default_branch failed"
+    [ -n "$tree" ] || refuse 9 "openspec/changes/$change/ is not on origin/$default_branch (archived, or never approved)"
+    keys+=("issue-number=$issue" "spec-pr-number=$spec_pr" "default-branch=$default_branch" "amendment=$brief") ;;
   judge)
     template=judge agent=codex
     pv_rc=0
@@ -529,6 +569,9 @@ sys.exit(0 if any(w["path"].rstrip("/").rsplit("/", 1)[-1] == sys.argv[1] for w 
 if [ "$verb" = judge ]; then
   name=$change-judge k=2
   while taken "$name"; do name=$change-judge-$k; k=$((k + 1)); done
+elif [ "$verb" = amend ]; then
+  name=$change-amend k=2
+  while taken "$name"; do name=$change-amend-$k; k=$((k + 1)); done
 fi
 taken "$name" && refuse 6 "a worktree or branch named '$name' (or ending in '/$name') already exists"
 
@@ -566,6 +609,7 @@ handle=$(grep -oE 'handle=[^ ]+' <<<"$launch_out" | head -n1 | cut -d= -f2)
 case "$verb" in
   start)     next="wait for its 'review, then type: approve <sha7>' line in Orca, review the spec PR, then type approve <sha7> in the terminal of $name" ;;
   implement) next="wait for its 'ready for the judge' line in Orca, then launch the judge with /sdd-loop judge <PR>" ;;
+  amend)     next="wait for its 'review, then type: approve <sha7>' line in Orca, review the amend PR, then type approve <sha7> in the terminal of $name; after it merges, re-judge the implementation PR with /sdd-loop judge <PR>" ;;
   judge)     next="wait for the verdict on the builder's worktree ($change-impl), then type approve <sha7> or fix in the builder's terminal" ;;
   archive)   next="wait for its 'review, then type: approve <sha7>' line in Orca, review the archive PR, then type approve <sha7> in the terminal of $name" ;;
 esac
