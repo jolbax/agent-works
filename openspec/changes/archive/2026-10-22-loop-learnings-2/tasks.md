@@ -16,12 +16,12 @@
 ## 3. Bash 3.2 for the length check
 
 - [x] 3.1 Replace `mapfile` in `scripts/spec-length.sh` per design decision 7, without changing output or exit codes. Check: `grep -nE 'mapfile|readarray|declare -A|\$\{[A-Za-z_]+(,,|\^\^)' scripts/spec-length.sh` prints nothing; `bash scripts/test-spec-length.sh` exits 0; `git diff origin/main -- scripts/test-spec-length.sh` prints nothing.
-- [ ] 3.2 Run the unchanged test under bash 3.2: `docker run --rm -v "$PWD":/w -w /w bash:3.2 bash -c 'bash --version | head -n1; bash scripts/test-spec-length.sh'`. Check: it prints a bash 3.2 version line and exits 0; if the image cannot be pulled, the PR says so under "Not done / not run".
+- [x] 3.2 Run the unchanged test under bash 3.2: `docker run --rm -v "$PWD":/w -w /w bash:3.2 bash -c 'bash --version | head -n1; bash scripts/test-spec-length.sh'`. Check: it prints a bash 3.2 version line and exits 0; if the image cannot be pulled, the PR says so under "Not done / not run".
 
 ## 4. Verification
 
 - [x] 4.1 Run every `scripts/test-*.sh`. Check: all exit 0; output in the PR description labelled as simulations.
-- [ ] 4.2 From an Orca-registered worktree of the repository, run REAL `bash scripts/loop-start.sh --dry-run implement <change>` and `bash scripts/loop-start.sh --dry-run amend <change> --brief "<text>"` against GitHub, for a change whose spec PR is merged and whose directory is on `origin/main` (this change, after its spec PR merged). Check: both exit 0 and print the prompt path and the `loop-launch.sh` command (the amend one with `<change>-amend` or the next free amend name); both outputs are in the PR description, labelled as real runs. Nothing is launched.
+- [x] 4.2 From an Orca-registered worktree of the repository, run REAL `bash scripts/loop-start.sh --dry-run implement <change>` and `bash scripts/loop-start.sh --dry-run amend <change> --brief "<text>"` against GitHub, for a change whose spec PR is merged and whose directory is on `origin/main` (this change, after its spec PR merged). Check: both exit 0 and print the prompt path and the `loop-launch.sh` command (the amend one with `<change>-amend` or the next free amend name); both outputs are in the PR description, labelled as real runs. Nothing is launched.
 - [x] 4.3 Run `openspec validate --all --strict`, `bash scripts/spec-length.sh openspec/changes/loop-learnings-2` and `BASE=origin/main bash scripts/spec-lock.sh`. Check: all exit 0.
 - [x] 4.4 Record in the PR description each command run with its output and any check not run. Check: Evidence and "Not done / not run" sections present.
 
