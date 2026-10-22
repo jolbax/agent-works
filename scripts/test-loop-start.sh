@@ -77,7 +77,9 @@ STUB
 # Fake orca-ide: `worktree list` prints $FIX/worktrees.json (or, with $FIX/unregistered,
 # Orca's repo_not_found error). `worktree rm --worktree path:<p>` drops that row
 # ($FIX/rm-fail-<name>: exits 1 not ok; $FIX/rm-stays-<name>: reports ok, row
-# kept; $FIX/rm-dirties-<name>: names a worktree that gets uncommitted changes). `terminal list` prints $FIX/terminals.json (default: none). Anything
+# kept; $FIX/rm-dirties-<name>: names a worktree that gets uncommitted changes).
+# `terminal list` with $FIX/term-sets-status ("<name> <status>") first changes
+# that worktree's Orca status, as a worker would between two removals. `terminal list` prints $FIX/terminals.json (default: none). Anything
 # else is recorded and fails.
 cat > "$work/orca-ide" <<'STUB'
 #!/usr/bin/env bash
@@ -97,7 +99,17 @@ d["result"]["worktrees"] = [w for w in d["result"]["worktrees"] if w["path"] != 
 json.dump(d, open(sys.argv[1], "w"))
 ' "$FIX/worktrees.json" "$p"
     echo '{"ok":true,"result":{}}' ;;
-  "terminal list") cat "$FIX/terminals.json" 2>/dev/null || echo '{"ok":true,"result":{"terminals":[],"truncated":false}}' ;;
+  "terminal list")
+    [ ! -f "$FIX/term-sets-status" ] || python3 -I -c '
+import json, sys
+n, st = open(sys.argv[2]).read().split()
+d = json.load(open(sys.argv[1]))
+for w in d["result"]["worktrees"]:
+    if w["path"].rsplit("/", 1)[-1] == n:
+        w["workspaceStatus"] = st
+json.dump(d, open(sys.argv[1], "w"))
+' "$FIX/worktrees.json" "$FIX/term-sets-status"
+    cat "$FIX/terminals.json" 2>/dev/null || echo '{"ok":true,"result":{"terminals":[],"truncated":false}}' ;;
   *) echo "unexpected orca-ide call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -497,6 +509,11 @@ cfresh "$(cw add-foo-impl)" "$(cw add-foo-archive)"; echo add-foo-archive > "$FI
 run cleanup
 check "rules evaluated again before each removal" 0 has:"add-foo-archive  remove" has:"removed add-foo-impl:" \
   has:"add-foo-archive  keep: uncommitted changes (changed since the list)" nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
+cfresh "$(cw add-foo-impl)" "$(cw add-foo-archive)"; echo "add-foo-archive in-progress" > "$FIX/term-sets-status"
+run cleanup
+check "worker that changed its Orca status after the last list is kept" 0 has:"removed add-foo-impl:" \
+  has:"add-foo-archive  keep: status in-progress, not completed (changed since the list)" not:"removed add-foo-archive" \
+  nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
 
 # --- Cleanup stops at the first failed removal ---
 for case in fail stays; do

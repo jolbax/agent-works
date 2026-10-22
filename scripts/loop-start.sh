@@ -361,7 +361,8 @@ PY
   removed=()
   for i in "${!todo[@]}"; do
     IFS=$'\t' read -r name path branch <<<"${todo[$i]}"
-    # The rules again, on the newest list: a worktree that changed is kept.
+    # The rules again, on a list read just now: a worktree that changed is kept.
+    orca_worktrees > "$work/list.json"
     rows "$work/list.json" > "$work/rows"
     line=$(awk -F'\t' -v p="$path" '$2 == p' "$work/rows")
     if [ -z "$line" ]; then echo "$name  keep: no longer listed"; continue; fi
