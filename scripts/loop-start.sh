@@ -108,8 +108,14 @@ repo_path() {
 
 # Orca worktree list of the repository as JSON; refuses a truncated list.
 orca_worktrees() {
-  local out
-  out=$("$ORCA" worktree list --repo "path:$(repo_path)" --limit 1000 --json) || fail "orca-ide worktree list failed"
+  local top out rc=0
+  top=$(repo_path)
+  out=$("$ORCA" worktree list --repo "path:$top" --limit 1000 --json) || rc=$?
+  # --json reports errors on stdout.
+  if grep -q '"repo_not_found"' <<<"$out"; then
+    fail "this checkout ($top) is not a repository registered in Orca; run from an Orca worktree of the repository"
+  fi
+  [ "$rc" = 0 ] || fail "orca-ide worktree list failed"
   python3 -I -c '
 import json, sys
 d = json.load(sys.stdin)
@@ -148,10 +154,18 @@ print(f"Worktrees ({len(active)} listed, {len(done)} completed not listed):")
 for w in active:
     status, comment = w.get("workspaceStatus") or "none", w.get("comment") or ""
     print(f"  {name(w)}  [{status}]  {comment or '(no comment)'}")
-    if status == "in-review":
+    # Only a "type: approve <sha>" or "type: fix" line is a reply typed in that
+    # worktree's terminal; "ready for the judge" asks the operator to launch the judge.
+    if status != "in-review":
+        print("    -> no action")
+    elif "ready for the judge" in comment:
+        m = re.search(r"PR #(\d+)", comment)
+        n = m.group(1) if m else (str(w["linkedPR"]) if w.get("linkedPR") else "<PR>")
+        print(f"    -> ACT: judge it with /sdd-loop judge {n} (bash scripts/loop-start.sh judge {n})")
+    elif re.search(r"type: (approve [0-9a-fA-F]{7,40}|fix)\b", comment):
         print(f"    -> ACT in the terminal of {name(w)}: {comment}")
     else:
-        print("    -> no action")
+        print(f"    -> ACT: {comment}")
 pat = re.compile(r"^(?:\*\*)?Verdict:\s*(.*?)\s+at\s+([0-9a-fA-F]{7,40})\b")
 loop_prs = [p for p in prs if p["title"].startswith(("spec: ", "impl: ", "archive: "))]
 print(f"Open loop PRs ({len(loop_prs)}):")

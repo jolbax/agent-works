@@ -54,12 +54,15 @@ case "$1" in
 esac
 STUB
 
-# Fake orca-ide: `worktree list` prints $FIX/worktrees.json; anything else is recorded and fails.
+# Fake orca-ide: `worktree list` prints $FIX/worktrees.json (or, with $FIX/unregistered,
+# Orca's repo_not_found error); anything else is recorded and fails.
 cat > "$work/orca-ide" <<'STUB'
 #!/usr/bin/env bash
 echo "orca-ide $*" >> "$LOG"
 case "$1 $2" in
-  "worktree list") cat "$FIX/worktrees.json" ;;
+  "worktree list")
+    [ -f "$FIX/unregistered" ] && { echo '{"ok":false,"error":{"code":"repo_not_found","message":"repo_not_found"}}'; exit 1; }
+    cat "$FIX/worktrees.json" ;;
   *) echo "unexpected orca-ide call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -252,6 +255,14 @@ fresh; rm "$FIX/repo.json"
 run implement add-foo
 check "gh call fails" 1 has:"gh repo view failed" nolog:"launch "
 
+fresh; touch "$FIX/unregistered"; prs "$(pr 22 "spec: add-foo" MERGED 31)"
+run implement add-foo
+check "checkout not registered in Orca (launch)" 1 \
+  has:"loop-start: this checkout (/fake/agent-works) is not a repository registered in Orca; run from an Orca worktree of the repository" nolog:"prompt " nolog:"launch "
+fresh; touch "$FIX/unregistered"
+run status
+check "checkout not registered in Orca (status)" 1 has:"is not a repository registered in Orca" nolog:"gh pr"
+
 # --- Launcher dry run launches nothing ---
 fresh; prs "$(pr 22 "spec: add-foo" MERGED 31)"
 run --dry-run implement add-foo
@@ -291,6 +302,15 @@ check "worker waits for the operator" 0 has:"ACT in the terminal of add-foo: PR 
 check "implementation PR without a verdict at its head" 0 has:"ACT: judge it with /sdd-loop judge 40" has:"ACT: judge it with /sdd-loop judge 41" \
   not:"judge 42" not:"judge 14" not:"#50" has:"openspec: missing" has:"not at head a1b2c3d"
 check "judge in progress is not suggested again" 0 not:"judge 43 " has:"judge add-qux-judge in progress"
+fresh
+worktrees "$(wt add-j-impl in-review "PR #44 at a1b2c3d: ready for the judge (launch it, then wait for its verdict)" 3)" \
+  "$(wt add-v-impl in-review "Verdict: BLOCKING (2 findings) at a1b2c3d; type: fix" 2)" \
+  "$(wt add-p-impl in-review "Verdict: PASS at a1b2c3d; type: approve a1b2c3d" 1)"
+run status
+check "comment: ready for the judge" 0 has:"-> ACT: judge it with /sdd-loop judge 44 (bash scripts/loop-start.sh judge 44)" not:"ACT in the terminal of add-j-impl"
+check "comment: verdict BLOCKING, type: fix" 0 has:"-> ACT in the terminal of add-v-impl: Verdict: BLOCKING (2 findings) at a1b2c3d; type: fix"
+check "comment: verdict PASS, type: approve" 0 has:"-> ACT in the terminal of add-p-impl: Verdict: PASS at a1b2c3d; type: approve a1b2c3d"
+
 bad=$(grep -vE '^(orca-ide worktree list |gh pr list --state open |gh pr view [0-9]+ --json headRefOid,statusCheckRollup,comments$|git rev-parse )' "$LOG" || true)
 if [ -z "$bad" ]; then echo "PASS status is read only"; else echo "FAIL status is read only: unexpected calls:"; sed 's/^/    /' <<<"$bad"; fail=1; fi
 
