@@ -22,6 +22,8 @@ MERGED_SHA=feedface00112233445566778899aabbccddeeff
 # Fake gh. Reads fixtures from $FIX; every call is appended to $LOG.
 #   repo.json            gh repo view (missing file: the call fails)
 #   prs.json             gh pr list --state all (unfiltered: the launcher must match titles exactly)
+#   search.json          gh pr list --state all --search ... (a stale search index:
+#                        default [], so it lacks every PR, including just-merged ones)
 #   open.json            gh pr list --state open
 #   pr-<N>.json          gh pr view <N> (missing: "Could not resolve")
 #   view-<N>.json        gh pr view <N> --json headRefOid,... (status)
@@ -32,7 +34,9 @@ cat > "$work/gh" <<'STUB'
 echo "gh $*" >> "$LOG"
 case "$1 $2" in
   "repo view") [ -f "$FIX/repo.json" ] || { echo "HTTP 502" >&2; exit 1; }; cat "$FIX/repo.json" ;;
-  "pr list") if [[ " $* " == *" --state all "* ]]; then cat "$FIX/prs.json"; else cat "$FIX/open.json"; fi ;;
+  "pr list")
+    if [[ " $* " == *" --search "* ]]; then cat "$FIX/search.json"
+    elif [[ " $* " == *" --state all "* ]]; then cat "$FIX/prs.json"; else cat "$FIX/open.json"; fi ;;
   "pr view")
     if [[ "$*" == *headRefOid* ]]; then cat "$FIX/view-$3.json"
     elif [ -f "$FIX/pr-$3.json" ]; then cat "$FIX/pr-$3.json"
@@ -47,7 +51,8 @@ STUB
 # Fake git: fetch succeeds (unless $FIX/fetch-fail), the main worktree is
 # /fake/agent-works, branches from $FIX/refs. For cleanup:
 #   toplevel             rev-parse --show-toplevel (default: /fake/agent-works)
-#   tree                 ls-tree of the default branch
+#   tree                 ls-tree of the default branch; `ls-tree <rev> openspec/changes/<c>/`
+#                        lists a file of <c> when tree has the directory openspec/changes/<c>
 #   head-<name>          HEAD of /fake/ws/<name> (default: $MERGED_SHA; "fail": the call fails)
 #   dirty-<name>         status --porcelain output of /fake/ws/<name>
 #   kept-branches        refs show-ref finds (one per line)
@@ -66,7 +71,13 @@ case "$1" in
       *) echo /fake/agent-works/.git ;;
     esac ;;
   for-each-ref) cat "$FIX/refs" 2>/dev/null || true ;;
-  ls-tree) cat "$FIX/tree" ;;
+  ls-tree)
+    if [[ "${3:-}" =~ ^openspec/changes/([^/]+)/$ ]]; then
+      [ -f "$FIX/tree" ] || exit 128
+      ! grep -qP "\topenspec/changes/${BASH_REMATCH[1]}\$" "$FIX/tree" || printf '100644 blob %s\t%sproposal.md\n' "$MERGED_SHA" "$3"
+    else
+      cat "$FIX/tree"
+    fi ;;
   merge-base) [ "$3" = "$MERGED_SHA" ] ;;
   status) cat "$FIX/dirty-$wt" 2>/dev/null || true ;;
   show-ref) grep -qxF -- "$4" "$FIX/kept-branches" 2>/dev/null || exit 1 ;;
@@ -147,7 +158,7 @@ join() { local IFS=,; echo "[$*]"; }
 fresh() {
   rm -rf "$FIX"; mkdir -p "$FIX"; : > "$LOG"
   echo '{"nameWithOwner":"acme/widgets","defaultBranchRef":{"name":"main"}}' > "$FIX/repo.json"
-  echo '[]' > "$FIX/prs.json"; echo '[]' > "$FIX/open.json"
+  echo '[]' > "$FIX/prs.json"; echo '[]' > "$FIX/open.json"; echo '[]' > "$FIX/search.json"
   worktrees
 }
 # worktrees [row...]: the Orca worktree list (the main worktree is always present).
@@ -526,5 +537,106 @@ for case in fail stays; do
     has:"; 1 removed (add-foo), not attempted: add-foo-archive" not:"removed add-foo-archive" \
     log:"worktree rm --worktree path:/fake/ws/add-foo-impl --json" nolog:"worktree rm --worktree path:/fake/ws/add-foo-archive"
 done
+
+# --- Launcher finds PRs without the search index ---
+# search.json models a stale search index: it holds older PRs, not the one just merged.
+fresh; prs "$(pr 10 "spec: add-old" MERGED 5)" "$(pr 22 "spec: add-foo" MERGED 31)"; join "$(pr 10 "spec: add-old" MERGED 5)" > "$FIX/search.json"
+run implement add-foo
+check "implement right after the spec merged" 0 log:"spec-pr-number=22 spec-merge-commit=$SPEC_SHA" log:"launch add-foo-impl claude" \
+  log:"gh pr list --state all --limit 200 --json number,title,state,mergedAt,mergeCommit,body"
+fresh; prs "$(pr 11 "impl: add-old" MERGED 5)" "$(pr 40 "impl: add-foo" MERGED 31)"; join "$(pr 11 "impl: add-old" MERGED 5)" > "$FIX/search.json"
+run archive add-foo
+check "archive right after the implementation merged" 0 log:"impl-pr-number=40" log:"launch add-foo-archive claude"
+for args in "implement add-foo" "archive add-foo" "amend add-foo --brief x"; do
+  fresh; changes add-foo; prs "$(pr 22 "spec: add-foo" MERGED 31)" "$(pr 40 "impl: add-foo" MERGED 31)"
+  # shellcheck disable=SC2086
+  run $args
+  check "no search query ($args)" 0 log:"gh pr list --state all" nolog:"--search"
+done
+fresh; prs "$(pr 23 "spec: add-foo-bar" MERGED 32)" "$(pr 24 "Spec: add-foo" MERGED 33)" "$(pr 25 "spec: add-foo " MERGED 34)"
+run implement add-foo
+check "similar titles are not matches" 3 has:"'spec: add-foo'" not:"#23" not:"#24" not:"#25" nolog:"prompt " nolog:"launch "
+window() { local i rows=(); for ((i = 1; i <= $1; i++)); do rows+=("$(pr $((1000 + i)) "chore: item $i" MERGED 1)"); done; prs "${rows[@]}"; }
+fresh; window 200
+run implement add-foo
+check "window exhausted" 3 has:"no merged PR titled exactly 'spec: add-foo' (only the newest 200 PRs were listed)" nolog:"launch "
+fresh; window 199
+run implement add-foo
+check "window not exhausted" 3 has:"'spec: add-foo'" not:"newest 200" nolog:"launch "
+
+# --- Amend changes an approved change through a spec-only PR ---
+AMENDMENT="the dry run also lists the change's own propose worktree"
+fresh; changes add-foo add-bar; prs "$(pr 22 "spec: add-foo" MERGED 31)" "$(pr 23 "spec: add-foo-bar" MERGED 32)"
+run amend add-foo --brief "$AMENDMENT"
+check "amend launched" 0 log:"git fetch origin" log:"git ls-tree origin/main openspec/changes/add-foo/" \
+  log:"change-name=add-foo issue-number=31 spec-pr-number=22 default-branch=main amendment=$AMENDMENT" \
+  log:"launch add-foo-amend claude $work/loop-start-add-foo-amend." log:"--base-branch origin/main --issue 31" \
+  has:"worker: add-foo-amend (claude, base origin/main)" has:"next: " has:"type approve <sha7> in the terminal of add-foo-amend"
+fresh; changes add-foo; prs "$(pr 22 "spec: add-foo" MERGED 31)"
+run --dry-run amend add-foo --brief "$AMENDMENT"
+promptfile=$(sed -n 's/^prompt: //p' <<<"$out")
+check "amend dry run" 0 has:"prompt: $work/" has:"launch (dry run, not run): bash scripts/loop-launch.sh add-foo-amend claude" \
+  has:"--base-branch origin/main --issue 31" log:"prompt " nolog:"launch "
+if [ -z "$promptfile" ] || [ ! -s "$promptfile" ] || grep -qE '<[a-z][a-z0-9-]*>' "$promptfile" \
+   || ! grep -qF -- "$AMENDMENT" "$promptfile" || ! grep -qF "amend: add-foo" "$promptfile"; then
+  echo "FAIL amend dry run prompt: missing, empty, with a <name> token, or without the amendment: $promptfile"; fail=1
+else
+  echo "PASS amend dry run prompt has the amendment and no <name> token"
+fi
+for case in worktree branch both; do
+  fresh; changes add-foo; prs "$(pr 22 "spec: add-foo" MERGED 31)"
+  case $case in
+    worktree) worktrees "$(wt add-foo-amend completed)"; want=add-foo-amend-2 ;;
+    branch) echo refs/remotes/origin/jolbax/add-foo-amend > "$FIX/refs"; want=add-foo-amend-2 ;;
+    both) worktrees "$(wt add-foo-amend completed)"; echo refs/heads/jolbax/add-foo-amend-2 > "$FIX/refs"; want=add-foo-amend-3 ;;
+  esac
+  run amend add-foo --brief x
+  check "next free amend number ($case)" 0 log:"launch $want claude" has:"worker: $want"
+done
+for case in open none; do
+  fresh; changes add-foo; [ "$case" = none ] || prs "$(pr 22 "spec: add-foo" OPEN 31)"
+  run amend add-foo --brief x
+  check "amend before the spec merged ($case)" 3 has:"'spec: add-foo'" nolog:"git ls-tree" nolog:"prompt " nolog:"launch "
+done
+fresh; changes add-foo; prs "$(pr 22 "spec: add-foo" MERGED)"
+run amend add-foo --brief x
+check "amend spec PR without Refs" 3 has:"Refs" nolog:"prompt " nolog:"launch "
+fresh; changes archive archive/2026-10-22-add-foo add-foo-bar; prs "$(pr 22 "spec: add-foo" MERGED 31)"
+run amend add-foo --brief x
+check "amend after the archive" 9 has:"openspec/changes/add-foo/ is not on origin/main" nolog:"prompt " nolog:"launch "
+amend_usage=(
+  "amend" "amend add-foo" "amend add-foo --brief" "amend Add_Foo --brief x" "amend add-foo --brief x --brief y"
+  "amend add-foo --brief x extra" "amend add-foo --issue 3" "amend --brief x"
+)
+for args in "${amend_usage[@]}"; do
+  fresh; : > "$LOG"
+  # shellcheck disable=SC2086
+  run $args
+  check "amend usage error: '$args'" 2 lines:0
+done
+for blank in "" "   "; do
+  fresh; : > "$LOG"
+  run amend add-foo --brief "$blank"
+  check "amend usage error: blank --brief '$blank'" 2 lines:0 has:"--brief must not be empty"
+done
+
+# --- Status: amend PR awaiting approval ---
+fresh
+worktrees "$(wt add-foo-amend in-review "PR #15 at b2c3d4e: review, then type: approve b2c3d4e" 1)"
+join '{"number":15,"title":"amend: add-foo","headRefName":"jolbax/add-foo-amend"}' > "$FIX/open.json"
+printf '{"headRefOid":"b2c3d4e5f60718293a4b5c6d7e8f901234567890","statusCheckRollup":%s,"comments":[]}' "$check_ok" > "$FIX/view-15.json"
+run status
+check "amend PR awaiting approval" 0 \
+  next:"#15 amend: add-foo  head b2c3d4e  openspec: SUCCESS  verdict: none=>-> ACT: type approve b2c3d4e in the terminal of add-foo-amend" \
+  next:"  add-foo-amend  [in-review]  PR #15 at b2c3d4e: review, then type: approve b2c3d4e=>-> ACT: type approve b2c3d4e in the terminal of add-foo-amend" \
+  not:"no action"
+
+# --- Cleanup: amend worker names ---
+cfresh "$(cw add-bar-amend)" "$(cw add-bar-amend-2)" "$(cw add-foo-amend-3)" "$(cw add-foo-amend-1)" "$(cw add-bar-amend-x)" \
+  "$(cw add-foo-notes)" "$(cw add-baz-amend)"
+run cleanup --dry-run
+check "loop worker names (amend)" 0 has:"add-bar-amend  remove" has:"add-bar-amend-2  remove" has:"add-foo-amend-3  remove" \
+  has:"add-foo-amend-1  keep: not a loop worker name" has:"add-bar-amend-x  keep: not a loop worker name" \
+  has:"add-foo-notes  keep: not a loop worker name" has:"add-baz-amend  keep: not a loop worker name" has:"3 to remove, 5 kept"
 
 [ "$fail" = 0 ] && echo "test-loop-start: all scenarios passed (simulation)" || { echo "test-loop-start: FAILED" >&2; exit 1; }
