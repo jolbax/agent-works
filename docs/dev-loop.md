@@ -144,6 +144,8 @@ bash scripts/spec-length.sh openspec/changes/<name>
 
 Anything the issue does not answer goes under "Open questions" in `proposal.md`.
 
+A change is built and judged while its own workers exist (`<name>`, `<name>-impl`, `<name>-judge[-N]`, `<name>-amend[-N]`), so a task check that runs a loop launcher or cleanup for real (`loop-start.sh` implement, judge, archive, amend or cleanup, or `loop-launch.sh`) names the expected refusal (for example exit 6 because `<name>-impl` exists), targets state the change does not create, or is covered by a stub simulation instead; an "exactly these" list of worktrees, PRs or branches states whether the change's own appear in it. Two implementation PRs needed an operator override without this rule: in PR #33 task 5.2 required the real cleanup dry run to list exactly three earlier changes' worktrees, missing the change's own completed propose worktree; in PR #37 task 4.2 required a real `loop-start.sh --dry-run implement` of the change itself to exit 0, which the launcher refused with exit 6 because its builder worktree existed. A task that cannot be met stays blocking for the judge; the operator settles it with amend (see "Settling a finding about the approved change").
+
 ### 3. Approve (operator and CI)
 
 The operator reviews the spec in Orca and types `approve <sha7>` in the propose worker's terminal, which merges it through `scripts/loop-merge.sh`. Merging on GitHub is equivalent. The merge commit approves that exact tree; elapsed time, agent output, a passing check or a judge verdict never approve a spec.
